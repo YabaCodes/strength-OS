@@ -1,0 +1,60 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover" />
+  <meta name="theme-color" content="#0f172a" />
+  <meta name="description" content="Strength OS — local-first workout tracking, progression and muscle analytics." />
+  <link rel="manifest" href="./manifest.json" />
+  <link rel="apple-touch-icon" href="./icons/icon-192.png" />
+  <link rel="stylesheet" href="./styles.css" />
+  <title>Strength OS</title>
+</head>
+<body>
+  <div id="app">
+    <header class="topbar">
+      <div class="brand-wrap">
+        <img src="./assets/strength-os-icon.png" alt="Strength OS logo" class="brand-logo" />
+        <div class="brand-block">
+          <p class="eyebrow" id="todayLabel"></p>
+          <h1>Strength OS</h1>
+        </div>
+      </div>
+      <div class="top-actions">
+        <button id="installBtn" class="btn ghost hidden" type="button">Install</button>
+        <button id="quickWeightBtn" class="icon-btn" type="button" aria-label="Log body weight">⚖</button>
+      </div>
+    </header>
+
+    <main id="view" class="content" aria-live="polite"></main>
+
+    <nav class="bottom-nav" aria-label="Primary navigation">
+      <button class="nav-btn active" data-view="train" type="button"><span>◆</span><small>Train</small></button>
+      <button class="nav-btn" data-view="programs" type="button"><span>▦</span><small>Programs</small></button>
+      <button class="nav-btn" data-view="history" type="button"><span>◷</span><small>History</small></button>
+      <button class="nav-btn" data-view="progress" type="button"><span>▲</span><small>Progress</small></button>
+      <button class="nav-btn" data-view="more" type="button"><span>•••</span><small>More</small></button>
+    </nav>
+
+    <div id="toast" class="toast" role="status" aria-live="polite"></div>
+    <div id="restTimer" class="rest-timer hidden" aria-live="polite">
+      <div><strong id="restTimerLabel">Rest</strong><span id="restTimerValue">01:30</span></div>
+      <button id="cancelTimer" type="button">Stop</button>
+    </div>
+
+    <dialog id="modal" class="modal">
+      <form method="dialog" class="modal-card" id="modalForm">
+        <div class="modal-head">
+          <div><p class="eyebrow" id="modalEyebrow"></p><h2 id="modalTitle">Edit</h2></div>
+          <button class="icon-btn" value="cancel" type="submit" aria-label="Close">×</button>
+        </div>
+        <div id="modalBody" class="modal-body"></div>
+        <div id="modalActions" class="modal-actions"></div>
+      </form>
+    </dialog>
+  </div>
+
+  <script src="./seed.js"></script>
+  <script src="./app.js" defer></script>
+</body>
+</html>
