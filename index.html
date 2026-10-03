@@ -29,11 +29,21 @@
     <main id="view" class="content" aria-live="polite"></main>
 
     <nav class="bottom-nav" aria-label="Primary navigation">
-      <button class="nav-btn active" data-view="train" type="button"><span>◆</span><small>Train</small></button>
-      <button class="nav-btn" data-view="programs" type="button"><span>▦</span><small>Programs</small></button>
-      <button class="nav-btn" data-view="history" type="button"><span>◷</span><small>History</small></button>
-      <button class="nav-btn" data-view="progress" type="button"><span>▲</span><small>Progress</small></button>
-      <button class="nav-btn" data-view="more" type="button"><span>•••</span><small>More</small></button>
+      <button class="nav-btn active" data-view="train" type="button">
+        <span class="nav-icon" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M3 10.5h2.2m13.6 0H21M7 8v5m10-5v5M5.2 8h1.8v5H5.2zm11.8 0h1.8v5H17zm-10 1.5h10"/></svg></span><small>Train</small>
+      </button>
+      <button class="nav-btn" data-view="programs" type="button">
+        <span class="nav-icon" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M7 3v2m10-2v2M4.5 8h15M6 5.5h12a1.5 1.5 0 0 1 1.5 1.5v10A1.5 1.5 0 0 1 18 18.5H6A1.5 1.5 0 0 1 4.5 17V7A1.5 1.5 0 0 1 6 5.5Z"/><path d="M8 11h3M8 14h5M15.5 12.5l1.2 1.2 2-2.4"/></svg></span><small>Programs</small>
+      </button>
+      <button class="nav-btn" data-view="history" type="button">
+        <span class="nav-icon" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M12 7v5l3 2"/><path d="M20 12a8 8 0 1 1-2.34-5.66"/><path d="M20 4v4h-4"/></svg></span><small>History</small>
+      </button>
+      <button class="nav-btn" data-view="progress" type="button">
+        <span class="nav-icon" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M5 19V11"/><path d="M12 19V7"/><path d="M19 19V4"/><path d="M3.5 19.5h17"/></svg></span><small>Progress</small>
+      </button>
+      <button class="nav-btn" data-view="more" type="button">
+        <span class="nav-icon" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M5 12h.01M12 12h.01M19 12h.01"/></svg></span><small>More</small>
+      </button>
     </nav>
 
     <div id="toast" class="toast" role="status" aria-live="polite"></div>

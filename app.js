@@ -27,6 +27,7 @@
   let libraryMuscle = "all";
   let selectedProgramId = state.settings.activeProgramId;
   let selectedExerciseAnalyticsId = "bench";
+  let trainPreviewProgramId = null, trainPreviewDayId = null;
   let restInterval = null, restEndAt = 0;
   let elapsedInterval = null;
   let deferredInstallPrompt = null;
@@ -144,7 +145,7 @@
   function isRepBased(ex){return ["weight_reps","bodyweight_reps","bodyweight_added","assisted_bodyweight","reps_only"].includes(ex.trackingType);}
   function isDurationBased(ex){return ["duration","weight_duration"].includes(ex.trackingType);}
 
-  function navigate(v){activeView=v;document.querySelectorAll(".nav-btn").forEach(b=>b.classList.toggle("active",b.dataset.view===v));stopElapsedTimer();render();}
+  function navigate(v){if(v!=="train"){trainPreviewProgramId=null;trainPreviewDayId=null;} activeView=v;document.querySelectorAll(".nav-btn").forEach(b=>b.classList.toggle("active",b.dataset.view===v));stopElapsedTimer();render();}
   function render(){
     byId("todayLabel").textContent=new Date().toLocaleDateString(undefined,{weekday:"long",month:"short",day:"numeric"});
     if(activeView==="train")renderTrain(); else if(activeView==="programs")renderPrograms(); else if(activeView==="history")renderHistory(); else if(activeView==="progress")renderProgress(); else renderMore();
@@ -155,16 +156,33 @@
   function renderTrain(){const live=liveSession();if(live)return renderLiveSession(live);
     const p=activeProgram(),d=todayProgramDay();const latestWeight=latestBody("weight"),avg7=bodyAverage("weight",7);
     const week=weekSummary(isoToday());
+    if(trainPreviewProgramId&&trainPreviewDayId){
+      const pp=state.programs[trainPreviewProgramId]||p;
+      const pd=pp?.days.find(x=>x.id===trainPreviewDayId);
+      if(pd)return renderTrainPreview(pp,pd);
+      trainPreviewProgramId=null;trainPreviewDayId=null;
+    }
     view.innerHTML=`<div class="stack">
       <section class="card hero"><div class="row start"><div><p class="meta">Active program</p><h2>${esc(p?.name||"No active program")}</h2><p class="meta">${d?`Today · ${esc(d.name)}`:"No scheduled session today"}</p></div><span class="pill ${week.completed>=week.scheduled&&week.scheduled?"good":"neutral"}">${week.completed}/${week.scheduled} this week</span></div></section>
-      ${d?`<section class="card"><div class="section-title"><h2>${esc(d.name)}</h2><span class="meta">${d.items.length} exercises · ${d.items.reduce((a,x)=>a+x.sets,0)} sets</span></div><div class="list" style="margin-top:7px">${d.items.slice(0,4).map(x=>`<div class="list-row"><div><strong>${esc(getExercise(x.exerciseId)?.name||"Missing exercise")}</strong><div class="meta">${x.sets} × ${x.min}–${x.max} · Priority ${x.priority}</div></div></div>`).join("")}${d.items.length>4?`<div class="meta">+ ${d.items.length-4} more exercises</div>`:""}</div><div class="grid-2" style="margin-top:12px"><button class="btn primary" id="startTodayBtn" type="button">Start ${esc(d.name)}</button><button class="btn ghost" id="skipTodayBtn" type="button">Mark skipped</button></div></section>`:`<section class="card"><h2>Recovery / flexible day</h2><p class="muted">Start an empty workout or choose any program day if you want to train.</p></section>`}
+      ${d?`<section class="card"><div class="section-title"><h2>${esc(d.name)}</h2><span class="meta">${d.items.length} exercises · ${d.items.reduce((a,x)=>a+x.sets,0)} sets</span></div><div class="list" style="margin-top:7px">${d.items.slice(0,4).map(x=>`<div class="list-row"><div><strong>${esc(getExercise(x.exerciseId)?.name||"Missing exercise")}</strong><div class="meta">${x.sets} × ${x.min}–${x.max} · Priority ${x.priority}</div></div></div>`).join("")}${d.items.length>4?`<div class="meta">+ ${d.items.length-4} more exercises</div>`:""}</div><div class="preview-actions" style="margin-top:12px"><button class="btn primary" id="viewTodayBtn" type="button">View workout</button><button class="btn ghost" id="skipTodayBtn" type="button">Mark skipped</button></div></section>`:`<section class="card"><h2>Recovery / flexible day</h2><p class="muted">Start an empty workout or choose any program day if you want to train.</p></section>`}
       <section class="grid-2"><div class="metric"><span class="meta">Body weight</span><strong>${latestWeight?`${round1(latestWeight.weight)} kg`:"—"}</strong><span class="small muted">7-day avg ${avg7?`${round1(avg7)} kg`:"—"}</span></div><div class="metric"><span class="meta">Waist</span><strong>${latestBody("waist")?`${round1(latestBody("waist").waist)} cm`:"—"}</strong><span class="small muted">Latest measurement</span></div></section>
-      <section class="card"><div class="section-title"><h2>Start another workout</h2><button class="btn ghost small-btn" id="emptyWorkoutBtn" type="button">Empty workout</button></div><div class="list">${p?.days.map(day=>`<div class="list-row click-row start-program-day" data-day="${day.id}"><div><strong>${esc(day.name)}</strong><div class="meta">${weekdayName(day.weekday)} · ${day.items.length} exercises</div></div><span>›</span></div>`).join("")||`<p class="empty">Create a program first.</p>`}</div></section>
+      <section class="card"><div class="section-title"><h2>Workout library</h2><button class="btn ghost small-btn" id="emptyWorkoutBtn" type="button">Empty workout</button></div><div class="list">${p?.days.map(day=>`<div class="list-row click-row preview-program-day" data-day="${day.id}"><div><strong>${esc(day.name)}</strong><div class="meta">${weekdayName(day.weekday)} · ${day.items.length} exercises</div></div><span>›</span></div>`).join("")||`<p class="empty">Create a program first.</p>`}</div></section>
     </div>`;
-    byId("startTodayBtn")?.addEventListener("click",()=>startProgramWorkout(p.id,d.id));
+    byId("viewTodayBtn")?.addEventListener("click",()=>openTrainPreview(p.id,d.id));
     byId("skipTodayBtn")?.addEventListener("click",()=>markSkippedWorkout(p.id,d.id));
     byId("emptyWorkoutBtn")?.addEventListener("click",startEmptyWorkout);
-    document.querySelectorAll(".start-program-day").forEach(r=>r.addEventListener("click",()=>startProgramWorkout(p.id,r.dataset.day)));
+    document.querySelectorAll(".preview-program-day").forEach(r=>r.addEventListener("click",()=>openTrainPreview(p.id,r.dataset.day)));
+  }
+
+  function openTrainPreview(programId,dayId){trainPreviewProgramId=programId;trainPreviewDayId=dayId;renderTrain();}
+
+  function renderTrainPreview(programObj,day){
+    const totalSets=day.items.reduce((a,x)=>a+x.sets,0);
+    view.innerHTML=`<div class="stack"><section class="card"><div class="preview-head"><button class="btn ghost small-btn back-inline" id="backToTrainBtn" type="button">‹ Back</button><div class="preview-title"><p class="eyebrow">Workout preview</p><h2>${esc(day.name)}</h2><p class="meta">${esc(programObj?.name||"Program")} · ${day.items.length} exercises · ${totalSets} sets</p></div><span class="pill neutral">Preview</span></div><div class="preview-actions three"><button class="btn primary" id="startPreviewWorkoutBtn" type="button">Start workout</button><button class="btn ghost" id="previewSkipBtn" type="button">Mark skipped</button><button class="btn ghost" id="previewEmptyBtn" type="button">Empty workout</button></div></section><section class="card"><div class="section-title"><h2>Exercises</h2><span class="meta">Tap Start when you're ready</span></div><div class="list">${day.items.map((x,idx)=>{const ex=getExercise(x.exerciseId)||{name:"Missing exercise",primaryMuscle:""};return `<div class="exercise-preview-row"><div><strong>${idx+1}. ${esc(ex.name)}</strong><div class="meta">${x.sets} × ${x.min}–${x.max} · ${restText(x.rest)} rest · Priority ${x.priority}</div><div class="meta">${muscleName(ex.primaryMuscle)}${ex.equipment?` · ${esc(ex.equipment)}`:''}</div></div><span class="pill ${x.priority==='A'?'good':x.priority==='B'?'neutral':'warn'}">${x.priority}</span></div>`;}).join("")}</div></section></div>`;
+    byId('backToTrainBtn').addEventListener('click',()=>{trainPreviewProgramId=null;trainPreviewDayId=null;renderTrain();});
+    byId('startPreviewWorkoutBtn').addEventListener('click',()=>startProgramWorkout(programObj.id,day.id));
+    byId('previewSkipBtn').addEventListener('click',()=>markSkippedWorkout(programObj.id,day.id));
+    byId('previewEmptyBtn').addEventListener('click',startEmptyWorkout);
   }
 
   function weekdayName(n){return ["Sunday","Monday","Tuesday","Wednesday","Thursday","Friday","Saturday"][Number(n)]||"Unscheduled";}

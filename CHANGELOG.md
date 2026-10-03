@@ -1,3 +1,8 @@
+## v2.0.3
+- Changed workout selection so tapping a workout opens a preview/details screen instead of starting immediately.
+- Added a dedicated **Start workout** button and a clear **Back** action from the preview screen.
+- Updated bottom tab icons to the cleaner Style A set for a more polished Wealth OS-like navigation look.
+
 
 ## v2.0.2
 - Replaced the app icon and brand logo with clean high-resolution Strength OS artwork.
