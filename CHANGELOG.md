@@ -1,3 +1,9 @@
+
+## v2.0.2
+- Replaced the app icon and brand logo with clean high-resolution Strength OS artwork.
+- Updated `assets/strength-os-icon.png`, `assets/strength-os-logo.png`, `icons/icon-192.png`, and `icons/icon-512.png`.
+- Bumped service worker cache version so GitHub Pages/Safari refreshes the new icon assets.
+
 # Strength OS v2.0
 
 Major rewrite of the original Strength + Protein Tracker.
