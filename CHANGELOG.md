@@ -1,3 +1,11 @@
+## v2.1.0
+- Rebuilt all bottom navigation icons as one normalized Style A SVG family with consistent 24×24 geometry, stroke weight, optical size, and alignment.
+- Replaced the emoji body-weight control with a matching SVG scale icon.
+- Refined the Train screen spacing, workout-library rows, active-program hierarchy, and navigation styling.
+- Reworked workout preview into a clearer read-only details screen with Back, session summary, exercise list, and a single prominent Start workout action.
+- Added explicit preview messaging so opening a workout cannot be confused with starting it.
+- No workout/body data model changes; existing local Strength OS data remains compatible.
+
 ## v2.0.3
 - Changed workout selection so tapping a workout opens a preview/details screen instead of starting immediately.
 - Added a dedicated **Start workout** button and a clear **Back** action from the preview screen.
