@@ -1,3 +1,11 @@
+## v2.2.0
+- Matured the Exercise Library with active/custom/built-in/archived filters, muscle filtering, program/history usage counts, exercise detail view, duplicate/archive/restore controls, and safe deletion rules for custom exercises.
+- Custom exercises created from an exercise picker now return directly into the original add/substitute workflow instead of dropping the task.
+- Added primary-muscle filtering to exercise pickers.
+- Expanded Program Builder with planned muscle-volume chips, estimated workout duration, day reordering, day duplication, exercise prescription duplication, and clearer primary/secondary muscle mapping.
+- Added a one-tap **Use exercise defaults** action when editing a program prescription.
+- Strengthened historical integrity: exercises referenced by programs/history cannot be deleted and should be archived instead.
+
 ## v2.1.0
 - Rebuilt all bottom navigation icons as one normalized Style A SVG family with consistent 24×24 geometry, stroke weight, optical size, and alignment.
 - Replaced the emoji body-weight control with a matching SVG scale icon.
