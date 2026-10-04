@@ -1,3 +1,11 @@
+## v2.5.0
+- Added a visible app version badge in the Strength OS header and an About card under More.
+- Standardized typography across headings, metadata, buttons, pills, lists, metrics, forms, and notes.
+- Added selectable 4/8/12-week effective-set trends for every muscle.
+- Upgraded muscle detail with an 8-week trend chart, current target context, and contributor breakdown.
+- Upgraded Body analytics with selectable measurements, 30D/90D/1Y/All ranges, latest-change context, and charts for optional measurements.
+- Preserved existing workout/body data and bumped the service-worker cache to v2.5.0.
+
 ## v2.4.0 — History + Exercise Analytics
 - Made calendar days interactive with selected-day filtering.
 - Added monthly history summary metrics for workouts, working sets, and training time.
