@@ -1,3 +1,45 @@
+## v2.8.0 — Reliability, in-gym logging, dark mode fixes
+
+Data safety
+- Import now checks that the file is a real Strength OS (or V1) backup, shows what will be replaced, asks before replacing, and keeps an undo copy (More → Data health → Restore previous data). Reset keeps the same undo copy.
+- If saved data can't be read, the app no longer overwrites it with an empty profile; it shows a banner and lets you download the raw data.
+- If browser storage is full, a banner says changes aren't being saved and offers an immediate backup.
+- Backups are exported through the share sheet on phones ("Save to Files"), and "Last backup" is only updated when the export actually happens. A reminder appears on Train after 14 days without a backup. Data health shows how much storage is used.
+- The app asks the browser to keep its storage persistent.
+
+Bug fixes
+- Editing a past workout no longer changes its duration when saved.
+- Body measurements can be edited and deleted again (tapping a row used to crash). Moving an entry onto a date that already has one merges them.
+- Pressing Return/Go in a pop-up saves instead of closing it and discarding the input.
+- History "Training time" shows real totals (it always showed 0m).
+- Workouts can't get stranded: "Save & close" is now "Pause workout", paused workouts appear on Train with Resume/Discard, History labels them "Unfinished", and editing a past workout is blocked while one is live.
+- The Progress screen no longer scrolls sideways on phones.
+- Body-weight and waist goals without a starting point (made before v2.6 or before the first weigh-in) no longer show "Achieved" on day one.
+- PRs: none on the first-ever session of an exercise; three sets at a new top weight count as one PR; bodyweight exercises earn Rep PRs; duration PRs for timed exercises; assisted exercises progress by reducing assistance.
+- Train shows today's workout as done after you finish it. Complete and shortened workouts count as done everywhere ("x/5 this week", Overview, Goals).
+- Body weight follows the kg/lb setting everywhere.
+
+Live workout
+- Rest timer plays a short beep (setting), survives the app being reloaded by iOS, and the screen stays on during a live workout (setting).
+- Set inputs are 16px so iOS no longer zooms in; Done buttons are 44px. After ✓, focus moves to the next set and the screen doesn't jump.
+- Finished exercises fold into a one-line summary once you move on; Technique/Pain sit on one compact row.
+- Tapping ✓ redraws only that exercise card.
+- The PR toast no longer covers the rest timer's buttons. Superset rest starts correctly when exercises have different set counts.
+- Log a workout on an earlier day from History (select a day → "+ Log a workout on this day"), and edit a workout's date and duration.
+
+Dark mode and visuals
+- No white flash on launch. Fixed unreadable insight cards, white pop-ups, white program-day headers, invisible "Technique good" state, white ✓ buttons, and low-contrast text.
+- Heat map: gray now means no sets; blue gets darker toward and past the target, with readable shades in both themes. Muscles are announced individually to VoiceOver.
+- Charts show dates and high/low labels at a readable size; the two small charts stack on phones. Muscle table headers no longer collide. The History calendar is more compact.
+- Accessibility: all set inputs are labelled, tappable rows work with keyboard/VoiceOver, the current tab is announced, and the page is no longer re-read aloud on every update. No automated contrast failures in light or dark mode.
+
+Speed and offline
+- Exercise analytics and Progress are much faster with long histories (about 1.1 s → 0.1 s with three years of data on a throttled phone CPU).
+- The header logo uses the 41 KB icon instead of a 1.2 MB image, and the unused 1 MB logo is no longer downloaded for offline use (first install ~2.8 MB → ~0.6 MB).
+- The service worker fetches fresh files when a new version installs, and the app shows "Strength OS has been updated — Reload".
+- The version number now lives in two places: APP_VERSION in app.js and VERSION in sw.js.
+- Code is formatted for readability (no logic changes from formatting alone).
+
 ## v2.7.0
 - Added Light / Dark / System themes and Comfortable / Compact layout density.
 - Added Train dashboard visibility controls for weekly progress, body weight, and waist.

@@ -3,7 +3,21 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover" />
-  <meta name="theme-color" content="#0f172a" />
+  <meta name="theme-color" content="#f5f7fa" />
+  <meta name="color-scheme" content="light dark" />
+  <script>
+    // Apply the saved theme before anything is drawn, so dark mode doesn't flash white on launch.
+    (function () {
+      try {
+        var s = JSON.parse(localStorage.getItem("strengthOSV2") || "{}").settings || {};
+        var pref = s.theme || "system";
+        var dark = pref === "dark" || (pref === "system" && window.matchMedia && matchMedia("(prefers-color-scheme: dark)").matches);
+        document.documentElement.dataset.theme = dark ? "dark" : "light";
+        document.documentElement.dataset.density = s.density === "compact" ? "compact" : "comfortable";
+        if (dark) document.querySelector('meta[name="theme-color"]').setAttribute("content", "#0b1120");
+      } catch (e) {}
+    })();
+  </script>
   <meta name="description" content="Strength OS — local-first workout tracking, progression and muscle analytics." />
   <link rel="manifest" href="./manifest.json" />
   <link rel="apple-touch-icon" href="./icons/icon-192.png" />
@@ -14,10 +28,10 @@
   <div id="app">
     <header class="topbar">
       <div class="brand-wrap">
-        <img src="./assets/strength-os-icon.png" alt="Strength OS logo" class="brand-logo" />
+        <img src="./icons/icon-192.png" alt="" class="brand-logo" width="40" height="40" />
         <div class="brand-block">
           <p class="eyebrow" id="todayLabel"></p>
-          <div class="brand-title-row"><h1>Strength OS</h1><span id="appVersionLabel" class="version-badge">v2.7.0</span></div>
+          <div class="brand-title-row"><h1>Strength OS</h1><span id="appVersionLabel" class="version-badge"></span></div>
         </div>
       </div>
       <div class="top-actions">
@@ -33,7 +47,8 @@
       </div>
     </header>
 
-    <main id="view" class="content" aria-live="polite"></main>
+    <div id="appBanner" class="app-banner hidden" role="alert"></div>
+    <main id="view" class="content"></main>
 
     <nav class="bottom-nav" aria-label="Primary navigation">
       <button class="nav-btn active" data-view="train" type="button" aria-label="Train">
@@ -95,7 +110,7 @@
       <form method="dialog" class="modal-card" id="modalForm">
         <div class="modal-head">
           <div><p class="eyebrow" id="modalEyebrow"></p><h2 id="modalTitle">Edit</h2></div>
-          <button class="icon-btn" value="cancel" type="submit" aria-label="Close">×</button>
+          <button class="icon-btn" id="modalCloseBtn" type="button" aria-label="Close">×</button>
         </div>
         <div id="modalBody" class="modal-body"></div>
         <div id="modalActions" class="modal-actions"></div>
