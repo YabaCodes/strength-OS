@@ -14,7 +14,7 @@
     DB_STORE = "kv";
   const PRE_UPGRADE_DAYS = 30;
   const VERSION = 3;
-  const APP_VERSION = "2.9.0"; // Bump together with VERSION in sw.js.
+  const APP_VERSION = "2.10.0"; // Bump together with VERSION in sw.js.
   const trackingTypes = [
     ["weight_reps", "Weight + reps"],
     ["bodyweight_reps", "Bodyweight + reps"],
@@ -482,6 +482,17 @@
       modalActions.querySelector(".btn.primary")?.click();
     });
     byId("modalCloseBtn")?.addEventListener("click", closeModal);
+    view.addEventListener("click", (e) => {
+      const b = e.target.closest(".show-more");
+      if (!b) return;
+      const key = b.dataset.list,
+        open = !expandedLists.has(key);
+      if (open) expandedLists.add(key);
+      else expandedLists.delete(key);
+      view.querySelector(`.collapsible[data-list="${key}"]`)?.classList.toggle("collapsed", !open);
+      b.textContent = open ? "Show less" : `Show all ${b.dataset.count}`;
+      b.setAttribute("aria-expanded", String(open));
+    });
     // iOS unlocks audio on a completed tap, so listen for both.
     ["touchend", "click"].forEach((t) => document.addEventListener(t, unlockAudio, { passive: true, capture: true }));
     // Rows that open something behave like buttons for keyboard and VoiceOver users.
@@ -810,6 +821,10 @@
       (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[c],
     );
   }
+  // Names in headings keep "5-Day" or "Single-Arm" together instead of breaking at the hyphen.
+  function nameHTML(v) {
+    return esc(v).replace(/[^\s<>&;]*-[^\s<>&;]+/g, (w) => `<span class="nw">${w}</span>`);
+  }
   function cap(s) {
     return s ? String(s).charAt(0).toUpperCase() + String(s).slice(1) : "";
   }
@@ -1016,14 +1031,14 @@
           .sort((a, b) => (b.endTime || 0) - (a.endTime || 0))[0]
       : null;
     view.innerHTML = `<div class="stack">
-      <section class="card hero train-hero"><div class="row start"><div><p class="meta">Active program</p><h2>${esc(p?.name || "No active program")}</h2><p class="meta">${d ? `Today · ${esc(d.name)}${doneToday ? ` · ${doneToday.status === "skipped" ? "skipped" : "done"}` : ""}` : "No scheduled session today"}</p></div>${showWeek ? `<span class="pill train-summary-badge">${week.done}/${week.scheduled} this week</span>` : ""}</div></section>
-      ${unfinished.map((u) => `<section class="card unfinished-card"><div class="row start"><div><p class="eyebrow">Unfinished workout</p><h2>${esc(u.name)}</h2><p class="meta">${fmtDate(u.date)} · ${u.items.reduce((n, i) => n + workingSets(i).length, 0)} sets logged</p></div><span class="pill warn">Paused</span></div><div class="preview-actions" style="margin-top:12px"><button class="btn primary resume-session" data-session="${u.id}" type="button">Resume</button><button class="btn ghost discard-session" data-session="${u.id}" type="button">Discard</button></div></section>`).join("")}
+      <section class="card hero train-hero"><div class="row start"><div><p class="meta">Active program</p><h2>${nameHTML(p?.name || "No active program")}</h2><p class="meta">${d ? `Today · ${esc(d.name)}${doneToday ? ` · ${doneToday.status === "skipped" ? "skipped" : "done"}` : ""}` : "No scheduled session today"}</p></div>${showWeek ? `<span class="pill train-summary-badge">${week.done}/${week.scheduled} this week</span>` : ""}</div></section>
+      ${unfinished.map((u) => `<section class="card unfinished-card"><div class="row start"><div><p class="eyebrow">Unfinished workout</p><h2>${nameHTML(u.name)}</h2><p class="meta">${fmtDate(u.date)} · ${u.items.reduce((n, i) => n + workingSets(i).length, 0)} sets logged</p></div><span class="pill warn">Paused</span></div><div class="preview-actions" style="margin-top:12px"><button class="btn primary resume-session" data-session="${u.id}" type="button">Resume</button><button class="btn ghost discard-session" data-session="${u.id}" type="button">Discard</button></div></section>`).join("")}
       ${backupReminderHTML()}
       ${
         d && doneToday
-          ? `<section class="card today-card done-today"><div class="section-title"><h2>${esc(d.name)}</h2><span class="pill ${doneToday.status === "complete" ? "good" : doneToday.status === "shortened" ? "warn" : "neutral"}">${doneToday.status === "skipped" ? "Skipped today" : `Done · ${cap(doneToday.status)}`}</span></div><p class="meta" style="margin-top:6px">${doneToday.status === "skipped" ? "Marked as skipped. You can still train if plans change." : `${doneToday.items.reduce((n, i) => n + workingSets(i).length, 0)} working sets${sessionDuration(doneToday) ? ` · ${durationText(sessionDuration(doneToday))}` : ""}. Nice work.`}</p><div class="preview-actions" style="margin-top:12px">${doneToday.status === "skipped" ? `<button class="btn primary" id="viewTodayBtn" type="button">View workout</button>` : `<button class="btn primary" id="viewTodayRecordBtn" data-session="${doneToday.id}" type="button">View record</button><button class="btn ghost" id="viewTodayBtn" type="button">Train again</button>`}</div></section>`
+          ? `<section class="card today-card done-today"><div class="section-title"><h2>${nameHTML(d.name)}</h2><span class="pill ${doneToday.status === "complete" ? "good" : doneToday.status === "shortened" ? "warn" : "neutral"}">${doneToday.status === "skipped" ? "Skipped today" : `Done · ${cap(doneToday.status)}`}</span></div><p class="meta" style="margin-top:6px">${doneToday.status === "skipped" ? "Marked as skipped. You can still train if plans change." : `${doneToday.items.reduce((n, i) => n + workingSets(i).length, 0)} working sets${sessionDuration(doneToday) ? ` · ${durationText(sessionDuration(doneToday))}` : ""}. Nice work.`}</p><div class="preview-actions" style="margin-top:12px">${doneToday.status === "skipped" ? `<button class="btn primary" id="viewTodayBtn" type="button">View workout</button>` : `<button class="btn primary" id="viewTodayRecordBtn" data-session="${doneToday.id}" type="button">View record</button><button class="btn ghost" id="viewTodayBtn" type="button">Train again</button>`}</div></section>`
           : d
-          ? `<section class="card today-card"><div class="section-title"><h2>${esc(d.name)}</h2><span class="meta">${d.items.length} exercises · ${d.items.reduce((a, x) => a + x.sets, 0)} sets</span></div><div class="list" style="margin-top:7px">${d.items
+          ? `<section class="card today-card"><div class="section-title"><h2>${nameHTML(d.name)}</h2><span class="meta">${d.items.length} exercises · ${d.items.reduce((a, x) => a + x.sets, 0)} sets</span></div><div class="list" style="margin-top:7px">${d.items
               .slice(0, 4)
               .map(
                 (x) =>
@@ -1109,7 +1124,7 @@
     view.innerHTML = `<div class="preview-shell">
       <section class="card preview-summary">
         <div class="preview-toolbar"><button class="btn ghost small-btn preview-back" id="backToTrainBtn" type="button"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="m15 18-6-6 6-6"/></svg>Back</button><span class="pill neutral">Preview only</span></div>
-        <p class="eyebrow" style="margin-top:14px">${esc(programObj?.name || "Program")}</p><h2>${esc(day.name)}</h2><p class="meta">Review the session before you start. The workout timer and active session begin only after you press Start workout.</p>
+        <p class="eyebrow" style="margin-top:14px">${esc(programObj?.name || "Program")}</p><h2>${nameHTML(day.name)}</h2><p class="meta">Review the session before you start. The workout timer and active session begin only after you press Start workout.</p>
         <div class="preview-kpis"><div class="preview-kpi"><span class="meta">Exercises</span><strong>${day.items.length}</strong></div><div class="preview-kpi"><span class="meta">Working sets</span><strong>${totalSets}</strong></div><div class="preview-kpi"><span class="meta">Approx.</span><strong>~${approxMinutes} min</strong></div></div>
         <div style="margin-top:14px"><button class="btn primary preview-start" id="startPreviewWorkoutBtn" type="button">Start workout</button></div>
       </section>
@@ -1323,7 +1338,7 @@
     const totalSets = s.items.reduce((n, i) => n + allWorkingSets(i).length, 0);
     const next = nextIncompleteItem(s);
     const statusLabel = s.status === "in_progress" ? (editing ? "Draft" : "In progress") : cap(s.status);
-    return `<section class="workout-head"><div class="row start"><div><p class="meta">${editing ? "Editing history" : "Live workout"}</p><h2 style="margin:2px 0 0">${esc(s.name)}</h2><p class="meta">${fmtDate(s.date)} · <span id="elapsedTimer" class="timer-big">${editing && !s.startTime ? "No duration" : durationText(elapsed)}</span></p></div><span class="pill ${s.status === "complete" ? "good" : s.status === "shortened" ? "warn" : "neutral"}">${statusLabel}</span></div><div class="progress-track"><div class="progress-fill" style="width:${totalSets ? Math.min(100, (completedSets / totalSets) * 100) : 0}%"></div></div><div class="row" style="margin-top:7px"><div class="meta">${completedSets}/${totalSets} working sets logged</div>${next ? `<button class="live-jump" id="jumpNextBtn" type="button">Next · ${esc((getExercise(next.exerciseId) || next.exerciseSnapshot).name)}</button>` : '<span class="pill good">All prescribed sets logged</span>'}</div></section>`;
+    return `<section class="workout-head"><div class="row start"><div><p class="meta">${editing ? "Editing history" : "Live workout"}</p><h2 style="margin:2px 0 0">${nameHTML(s.name)}</h2><p class="meta">${fmtDate(s.date)} · <span id="elapsedTimer" class="timer-big">${editing && !s.startTime ? "No duration" : durationText(elapsed)}</span></p></div><span class="pill ${s.status === "complete" ? "good" : s.status === "shortened" ? "warn" : "neutral"}">${statusLabel}</span></div><div class="progress-track"><div class="progress-fill" style="width:${totalSets ? Math.min(100, (completedSets / totalSets) * 100) : 0}%"></div></div><div class="row" style="margin-top:7px"><div class="meta">${completedSets}/${totalSets} working sets logged</div>${next ? `<button class="live-jump" id="jumpNextBtn" type="button">Next · ${esc((getExercise(next.exerciseId) || next.exerciseSnapshot).name)}</button>` : '<span class="pill good">All prescribed sets logged</span>'}</div></section>`;
   }
   function wireLiveHead(s) {
     const next = nextIncompleteItem(s);
@@ -1379,7 +1394,7 @@
           .map((x) => (getExercise(x.exerciseId) || x.exerciseSnapshot).name)
       : [];
     const canFold = itemComplete(item);
-    return `<section class="card exercise-card ${item.supersetGroup ? "superset-card" : ""}" id="exercise_${item.id}"><div class="exercise-top"><div class="row start"><div><div class="wrap"><h3>${esc(ex.name)}</h3><span class="pill priority-pill">${esc(item.target?.priority || "B")}</span>${sup}${prPill}</div><div class="target">${item.target?.sets || sets.length} × ${item.target?.min || ex.defaultMin}–${item.target?.max || ex.defaultMax} · ${restText(item.target?.rest || ex.defaultRest || 90)} rest</div><div class="meta">${muscleName(ex.primaryMuscle)} · ${esc(ex.equipment || "")} · ${trackingLabel(ex.trackingType)}</div>${supNames.length ? `<div class="meta superset-link">Linked with ${supNames.map(esc).join(" + ")}</div>` : ""}</div><div class="exercise-top-actions">${canFold ? `<button class="icon-btn toggle-item" data-item="${item.id}" type="button" aria-expanded="true" aria-label="Fold ${esc(ex.name)}">⌃</button>` : ""}<button class="icon-btn exercise-menu" data-item="${item.id}" type="button" aria-label="Options for ${esc(ex.name)}">•••</button></div></div></div><div class="exercise-body">
+    return `<section class="card exercise-card ${item.supersetGroup ? "superset-card" : ""}" id="exercise_${item.id}"><div class="exercise-top"><div class="row start"><div><div class="wrap"><h3>${nameHTML(ex.name)}</h3><span class="pill priority-pill">${esc(item.target?.priority || "B")}</span>${sup}${prPill}</div><div class="target">${item.target?.sets || sets.length} × ${item.target?.min || ex.defaultMin}–${item.target?.max || ex.defaultMax} · ${restText(item.target?.rest || ex.defaultRest || 90)} rest</div><div class="meta">${muscleName(ex.primaryMuscle)} · ${esc(ex.equipment || "")} · ${trackingLabel(ex.trackingType)}</div>${supNames.length ? `<div class="meta superset-link">Linked with ${supNames.map(esc).join(" + ")}</div>` : ""}</div><div class="exercise-top-actions">${canFold ? `<button class="icon-btn toggle-item" data-item="${item.id}" type="button" aria-expanded="true" aria-label="Fold ${esc(ex.name)}">⌃</button>` : ""}<button class="icon-btn exercise-menu" data-item="${item.id}" type="button" aria-label="Options for ${esc(ex.name)}">•••</button></div></div></div><div class="exercise-body">
       ${ex.notes ? `<div class="note-box"><strong>Exercise note:</strong> ${esc(ex.notes)}</div>` : ""}
       <div class="previous"><div><strong>Previous:</strong> ${previousText(prev, ex)}</div><div><strong>Suggested:</strong> ${esc(suggestion)}</div></div>
       <div class="set-head" aria-hidden="true"><span>Set</span><span>Type</span><span>${loadHeader(ex)}</span><span>${repHeader(ex)}</span><span>${state.settings.trackRir ? "RIR" : ""}</span><span>Done</span></div>
@@ -2041,7 +2056,7 @@
     if (p) selectedProgramId = p.id;
     const activeExercises = Object.values(state.exercises).filter((e) => !e.archived),
       customCount = activeExercises.filter((e) => !e.builtIn).length;
-    view.innerHTML = `<div class="stack"><section class="card"><div class="row"><div><p class="eyebrow">Program builder</p><h2>${p ? esc(p.name) : "No program"}</h2><p class="meta">${p?.description ? esc(p.description) : "Create and edit reusable workout schedules."}</p></div><button class="btn primary" id="newProgramBtn" type="button">+ Program</button></div><div class="tabs" style="margin-top:12px">${Object.values(
+    view.innerHTML = `<div class="stack"><section class="card"><div class="row"><div><p class="eyebrow">Program builder</p><h2>${p ? nameHTML(p.name) : "No program"}</h2><p class="meta">${p?.description ? esc(p.description) : "Create and edit reusable workout schedules."}</p></div><button class="btn primary" id="newProgramBtn" type="button">+ Program</button></div><div class="tabs" style="margin-top:12px">${Object.values(
       state.programs,
     )
       .map(
@@ -2093,20 +2108,33 @@
       save();
       renderPrograms();
     });
-    document.querySelectorAll(".edit-day").forEach((b) =>
-      b.addEventListener("click", () =>
-        openProgramDayModal(
-          p,
-          p.days.find((d) => d.id === b.dataset.day),
-        ),
-      ),
+    document.querySelectorAll(".day-menu").forEach((b) =>
+      b.addEventListener("click", () => {
+        const di = p.days.findIndex((x) => x.id === b.dataset.day),
+          d = p.days[di];
+        if (!d) return;
+        openActionSheet("Program day", d.name, [
+          ["Edit day", () => openProgramDayModal(p, d)],
+          ["Move up", () => moveProgramDay(p, d.id, -1), di === 0],
+          ["Move down", () => moveProgramDay(p, d.id, 1), di === p.days.length - 1],
+          ["Duplicate day", () => duplicateProgramDay(p, d.id)],
+        ]);
+      }),
     );
-    document
-      .querySelectorAll(".duplicate-day")
-      .forEach((b) => b.addEventListener("click", () => duplicateProgramDay(p, b.dataset.day)));
-    document
-      .querySelectorAll(".move-day")
-      .forEach((b) => b.addEventListener("click", () => moveProgramDay(p, b.dataset.day, Number(b.dataset.dir))));
+    document.querySelectorAll(".item-menu").forEach((b) =>
+      b.addEventListener("click", () => {
+        const d = p.days.find((x) => x.id === b.dataset.day),
+          ii = d ? d.items.findIndex((x) => x.id === b.dataset.item) : -1,
+          it = d?.items[ii];
+        if (!it) return;
+        openActionSheet(d.name, getExercise(it.exerciseId)?.name || "Exercise", [
+          ["Edit sets, reps and rest", () => openProgramItemModal(p, d, it, it.exerciseId)],
+          ["Move up", () => moveProgramItem(p, d.id, it.id, -1), ii === 0],
+          ["Move down", () => moveProgramItem(p, d.id, it.id, 1), ii === d.items.length - 1],
+          ["Duplicate", () => duplicateProgramItem(p, d.id, it.id)],
+        ]);
+      }),
+    );
     document.querySelectorAll(".add-program-ex").forEach((b) =>
       b.addEventListener("click", () => {
         const d = p.days.find((x) => x.id === b.dataset.day);
@@ -2120,14 +2148,6 @@
         openProgramItemModal(p, d, it, it.exerciseId);
       }),
     );
-    document
-      .querySelectorAll(".duplicate-program-item")
-      .forEach((b) => b.addEventListener("click", () => duplicateProgramItem(p, b.dataset.day, b.dataset.item)));
-    document
-      .querySelectorAll(".move-item")
-      .forEach((b) =>
-        b.addEventListener("click", () => moveProgramItem(p, b.dataset.day, b.dataset.item, Number(b.dataset.dir))),
-      );
     byId("addExerciseLibraryBtn").addEventListener("click", () => openExerciseModal(null, () => openLibraryModal()));
     byId("openLibraryBtn").addEventListener("click", () => openLibraryModal());
   }
@@ -2157,14 +2177,14 @@
     return Math.max(5, Math.round((rest + work) / 60));
   }
   function programDayCard(p, d, di) {
-    return `<section class="card program-day"><div class="program-day-head"><div class="row start"><div><h3>${esc(d.name)}</h3><div class="meta">${weekdayName(d.weekday)} · ${d.items.length} exercises · ${d.items.reduce((a, x) => a + x.sets, 0)} sets · ~${estimatedDayMinutes(d)} min</div><div class="wrap" style="margin-top:7px">${plannedDayMuscleChips(d) || `<span class="meta">Add exercises to see muscle coverage.</span>`}</div></div><div class="wrap"><button class="btn ghost small-btn move-day" data-day="${d.id}" data-dir="-1" type="button" ${di === 0 ? "disabled" : ""} aria-label="Move day up">↑</button><button class="btn ghost small-btn move-day" data-day="${d.id}" data-dir="1" type="button" ${di === p.days.length - 1 ? "disabled" : ""} aria-label="Move day down">↓</button><button class="btn ghost small-btn duplicate-day" data-day="${d.id}" type="button">Copy</button><button class="btn ghost small-btn edit-day" data-day="${d.id}" type="button">Edit</button></div></div></div><div class="program-items">${d.items
+    return `<section class="card program-day"><div class="program-day-head"><div class="row start"><div><h3>${nameHTML(d.name)}</h3><div class="meta">${weekdayName(d.weekday)} · ${d.items.length} exercises · ${d.items.reduce((a, x) => a + x.sets, 0)} sets · ~${estimatedDayMinutes(d)} min</div><div class="wrap" style="margin-top:7px">${plannedDayMuscleChips(d) || `<span class="meta">Add exercises to see muscle coverage.</span>`}</div></div><button class="icon-btn menu-btn day-menu" data-day="${d.id}" type="button" aria-label="Options for ${esc(d.name)}">⋯</button></div></div><div class="program-items">${d.items
       .map((it, ii) => {
         const ex = getExercise(it.exerciseId);
-        return `<div class="program-item"><div class="row start"><div><strong>${esc(ex?.name || "Missing exercise")}</strong><div class="meta">${it.sets} × ${it.min}–${it.max} · ${restText(it.rest)} · Priority ${it.priority}${it.supersetGroup ? ` · SS ${esc(it.supersetGroup)}` : ""}</div><div class="meta">${ex ? `${muscleName(ex.primaryMuscle)}${(ex.secondaryMuscles || []).length ? ` → ${(ex.secondaryMuscles || []).map(muscleName).join(", ")}` : ""}` : ""}</div></div><div class="wrap"><button class="btn ghost small-btn move-item" data-day="${d.id}" data-item="${it.id}" data-dir="-1" type="button" ${ii === 0 ? "disabled" : ""}>↑</button><button class="btn ghost small-btn move-item" data-day="${d.id}" data-item="${it.id}" data-dir="1" type="button" ${ii === d.items.length - 1 ? "disabled" : ""}>↓</button><button class="btn ghost small-btn duplicate-program-item" data-day="${d.id}" data-item="${it.id}" type="button">Copy</button><button class="btn ghost small-btn edit-program-item" data-day="${d.id}" data-item="${it.id}" type="button">Edit</button></div></div></div>`;
+        return `<div class="program-item"><button class="program-item-main edit-program-item" data-day="${d.id}" data-item="${it.id}" type="button"><strong>${nameHTML(ex?.name || "Missing exercise")}</strong><span class="meta">${it.sets} × ${it.min}–${it.max} · ${restText(it.rest)} · Priority ${it.priority}${it.supersetGroup ? ` · SS ${esc(it.supersetGroup)}` : ""}</span><span class="meta">${ex ? `${muscleName(ex.primaryMuscle)}${(ex.secondaryMuscles || []).length ? ` → ${(ex.secondaryMuscles || []).map(muscleName).join(", ")}` : ""}` : ""}</span></button><button class="icon-btn menu-btn item-menu" data-day="${d.id}" data-item="${it.id}" type="button" aria-label="Options for ${esc(ex?.name || "exercise")}">⋯</button></div>`;
       })
       .join(
         "",
-      )}<button class="btn ghost add-program-ex" data-day="${d.id}" type="button" style="margin:10px 0">+ Exercise</button></div></section>`;
+      )}<button class="btn ghost small-btn add-program-ex" data-day="${d.id}" type="button">+ Exercise</button></div></section>`;
   }
   function moveProgramDay(p, dayId, dir) {
     const i = p.days.findIndex((x) => x.id === dayId),
@@ -2378,7 +2398,7 @@
         return muscleOk && searchOk && scopeOk;
       })
       .sort((a, b) => a.name.localeCompare(b.name));
-    return `<div class="stack"><div class="form-grid"><label>Search<input id="librarySearchInput" value="${esc(librarySearch)}" placeholder="Exercise name"></label><label>Primary muscle<select id="libraryMuscleSelect"><option value="all">All muscles</option>${SEED.muscles.map((m) => `<option value="${m.id}" ${libraryMuscle === m.id ? "selected" : ""}>${m.name}</option>`).join("")}</select></label></div><div class="tabs">${[
+    return `<div class="stack"><div class="form-grid"><label>Search<input id="librarySearchInput" value="${esc(librarySearch)}" placeholder="Exercise name"></label><label>Primary muscle<select id="libraryMuscleSelect"><option value="all">All muscles</option>${SEED.muscles.map((m) => `<option value="${m.id}" ${libraryMuscle === m.id ? "selected" : ""}>${m.name}</option>`).join("")}</select></label></div><div class="tabs seg">${[
       ["active", "Active"],
       ["custom", "Custom"],
       ["builtin", "Built-in"],
@@ -2734,7 +2754,7 @@
     const pos = chron.findIndex((x) => x.id === s.id),
       prev = pos > 0 ? chron[pos - 1] : null,
       next = pos >= 0 && pos < chron.length - 1 ? chron[pos + 1] : null;
-    view.innerHTML = `<div class="stack"><section class="card"><div class="preview-head"><button class="btn ghost small-btn back-inline" id="backHistoryBtn" type="button">‹ History</button><div class="preview-title"><p class="eyebrow">Workout record</p><h2>${esc(s.name)}</h2><p class="meta">${fmtDate(s.date)} · ${statusLabel(s.status)}</p></div><span class="pill ${statusPillClass(s.status)}">${statusLabel(s.status)}</span></div><div class="grid-3"><div class="metric"><span class="meta">Duration</span><strong>${s.startTime && s.status !== "in_progress" ? durationText(sessionDuration(s)) : "—"}</strong></div><div class="metric"><span class="meta">Working sets</span><strong>${sets}</strong></div><div class="metric"><span class="meta">Volume</span><strong>${vol ? Math.round(unitWeight(vol)) : "—"}</strong><span class="small muted">${weightUnit()}-reps</span></div></div>${s.notes ? `<div class="note-box" style="margin-top:10px">${esc(s.notes)}</div>` : ""}<div class="wrap" style="margin-top:12px"><button class="btn ${s.status === "in_progress" ? "primary" : "ghost"}" id="editHistoryBtn" type="button">${s.status === "in_progress" ? "Resume" : "Edit workout"}</button><button class="btn danger" id="deleteHistoryBtn" type="button">Delete</button></div></section>
+    view.innerHTML = `<div class="stack"><section class="card"><div class="preview-head"><button class="btn ghost small-btn back-inline" id="backHistoryBtn" type="button">‹ History</button><div class="preview-title"><p class="eyebrow">Workout record</p><h2>${nameHTML(s.name)}</h2><p class="meta">${fmtDate(s.date)} · ${statusLabel(s.status)}</p></div><span class="pill ${statusPillClass(s.status)}">${statusLabel(s.status)}</span></div><div class="grid-3"><div class="metric"><span class="meta">Duration</span><strong>${s.startTime && s.status !== "in_progress" ? durationText(sessionDuration(s)) : "—"}</strong></div><div class="metric"><span class="meta">Working sets</span><strong>${sets}</strong></div><div class="metric"><span class="meta">Volume</span><strong>${vol ? Math.round(unitWeight(vol)) : "—"}</strong><span class="small muted">${weightUnit()}-reps</span></div></div>${s.notes ? `<div class="note-box" style="margin-top:10px">${esc(s.notes)}</div>` : ""}<div class="wrap" style="margin-top:12px"><button class="btn ${s.status === "in_progress" ? "primary" : "ghost"}" id="editHistoryBtn" type="button">${s.status === "in_progress" ? "Resume" : "Edit workout"}</button><button class="btn danger" id="deleteHistoryBtn" type="button">Delete</button></div></section>
       ${prs.length ? `<section class="card"><div class="section-title"><h2>PRs from this workout</h2><span class="pill good">${prs.length}</span></div><div class="list">${prs.map((p) => `<div class="list-row"><div><strong>${esc(getExercise(p.exerciseId)?.name || "Exercise")}</strong><div class="meta">${esc(p.type)}</div></div><span class="pill good">${prDisplay(p)}</span></div>`).join("")}</div></section>` : ""}
       <section class="card"><div class="section-title"><h2>Exercises</h2><span class="meta">${s.items.length} exercises</span></div><div class="history-exercise-list">${s.items.map((i) => historyExerciseDetail(i)).join("") || `<div class="empty">No exercises recorded.</div>`}</div></section>
       <section class="card"><div class="preview-actions"><button class="btn ghost" id="previousHistorySession" type="button" ${prev ? "" : "disabled"}>‹ Previous workout</button><button class="btn ghost" id="nextHistorySession" type="button" ${next ? "" : "disabled"}>Next workout ›</button></div></section></div>`;
@@ -2808,7 +2828,7 @@
 
   // ---------- PROGRESS / ANALYTICS ----------
   function renderProgress() {
-    view.innerHTML = `<div class="stack"><section class="card"><div class="tabs">${[
+    view.innerHTML = `<div class="stack"><div class="tabs seg progress-tabs" role="tablist" aria-label="Progress sections">${[
       ["overview", "Overview"],
       ["muscles", "Muscles"],
       ["exercise", "Exercise"],
@@ -2817,9 +2837,9 @@
     ]
       .map(
         ([id, n]) =>
-          `<button class="tab ${progressTab === id ? "active" : ""}" data-progress-tab="${id}" type="button">${n}</button>`,
+          `<button class="tab ${progressTab === id ? "active" : ""}" data-progress-tab="${id}" type="button" role="tab" aria-selected="${progressTab === id}">${n}</button>`,
       )
-      .join("")}</div></section><div id="progressContent">${progressTabHTML()}</div></div>`;
+      .join("")}</div><div id="progressContent" class="stack">${progressTabHTML()}</div></div>`;
     document.querySelectorAll("[data-progress-tab]").forEach((b) =>
       b.addEventListener("click", () => {
         progressTab = b.dataset.progressTab;
@@ -3095,7 +3115,7 @@
       target = state.settings.muscleTargets[selectedMuscleTrendId] || [0, 0],
       trendAvg = trend.length ? trend.reduce((a, b) => a + b.value, 0) / trend.length : 0;
     return `<section class="card"><div class="section-title"><div><p class="eyebrow">Muscle analytics</p><h2>This week</h2></div><span class="meta">${fmtDate(start)} – ${fmtDate(end)}</span></div><div class="legend heat-legend" style="margin-top:10px"><span>None</span><i class="heat-0"></i><span class="legend-gap"></span><span>Low</span><i class="heat-1"></i><i class="heat-2"></i><i class="heat-3"></i><i class="heat-4"></i><span>High</span></div><div class="body-map-wrap" style="margin-top:8px">${bodyMapSVG("front", stats)}${bodyMapSVG("back", stats)}</div><p class="meta">Gray means no sets yet this week. Blue gets darker as you approach and pass your weekly target.</p></section>
-    <section class="card"><div class="section-title"><div><p class="eyebrow">Volume trend</p><h2>${esc(muscleName(selectedMuscleTrendId))}</h2></div><span class="pill neutral">${muscleTrendWeeks}-week avg ${round1(trendAvg)}</span></div><div class="analytics-top" style="margin-top:10px"><label>Muscle<select id="muscleTrendSelect">${SEED.muscles.map((m) => `<option value="${m.id}" ${m.id === selectedMuscleTrendId ? "selected" : ""}>${m.name}</option>`).join("")}</select></label><div class="tabs">${[
+    <section class="card"><div class="section-title"><div><p class="eyebrow">Volume trend</p><h2>${nameHTML(muscleName(selectedMuscleTrendId))}</h2></div><span class="pill neutral">${muscleTrendWeeks}-week avg ${round1(trendAvg)}</span></div><div class="analytics-top" style="margin-top:10px"><label>Muscle<select id="muscleTrendSelect">${SEED.muscles.map((m) => `<option value="${m.id}" ${m.id === selectedMuscleTrendId ? "selected" : ""}>${m.name}</option>`).join("")}</select></label><div class="tabs seg">${[
       [4, "4W"],
       [8, "8W"],
       [12, "12W"],
@@ -3227,10 +3247,10 @@
     ];
     const filtered = (pts) => filterAnalyticsRange(pts, exerciseAnalyticsRangeDays);
     const prTimeline = exercisePRTimeline(ex?.id).slice(0, 12);
-    return `<section class="card"><div class="analytics-top"><label>Exercise<select id="analyticsExerciseSelect">${active.map((x) => `<option value="${x.id}" ${x.id === selectedExerciseAnalyticsId ? "selected" : ""}>${esc(x.name)}</option>`).join("")}</select></label><div class="tabs analytics-range-tabs">${ranges.map(([d, n]) => `<button class="tab ${exerciseAnalyticsRangeDays === d ? "active" : ""}" data-analytics-range="${d}" type="button">${n}</button>`).join("")}</div></div></section>${
+    return `<section class="card"><div class="analytics-top"><label>Exercise<select id="analyticsExerciseSelect">${active.map((x) => `<option value="${x.id}" ${x.id === selectedExerciseAnalyticsId ? "selected" : ""}>${esc(x.name)}</option>`).join("")}</select></label><div class="tabs seg analytics-range-tabs">${ranges.map(([d, n]) => `<button class="tab ${exerciseAnalyticsRangeDays === d ? "active" : ""}" data-analytics-range="${d}" type="button">${n}</button>`).join("")}</div></div></section>${
       ex
         ? `
-      <section class="card analytics-hero"><div class="row start"><div><p class="eyebrow">Exercise analytics</p><h2>${esc(ex.name)}</h2><p class="meta">${muscleName(ex.primaryMuscle)} · ${esc(ex.equipment || "")} · ${rangeLabel}</p></div><span class="pill neutral">${trackingLabel(ex.trackingType)}</span></div>${latest ? `<div class="latest-performance"><span class="meta">Latest performance · ${fmtDate(latest.date)}</span><strong>${esc(latest.summary)}</strong></div>` : ""}</section>
+      <section class="card analytics-hero"><div class="row start"><div><p class="eyebrow">Exercise analytics</p><h2>${nameHTML(ex.name)}</h2><p class="meta">${muscleName(ex.primaryMuscle)} · ${esc(ex.equipment || "")} · ${rangeLabel}</p></div><span class="pill neutral">${trackingLabel(ex.trackingType)}</span></div>${latest ? `<div class="latest-performance"><span class="meta">Latest performance · ${fmtDate(latest.date)}</span><strong>${esc(latest.summary)}</strong></div>` : ""}</section>
       <section class="grid-3 analytics-metrics"><div class="metric"><span class="meta">Current e1RM</span><strong>${latest?.e1rm ? `${round1(unitWeight(latest.e1rm))} ${weightUnit()}` : "—"}</strong></div><div class="metric"><span class="meta">Best e1RM</span><strong>${stats.bestE ? `${round1(unitWeight(stats.bestE))} ${weightUnit()}` : "—"}</strong></div><div class="metric"><span class="meta">Highest load</span><strong>${stats.bestLoad ? `${unitWeight(stats.bestLoad)} ${weightUnit()}` : "—"}</strong></div><div class="metric"><span class="meta">Best set</span><strong style="font-size:18px">${stats.bestSet ? esc(setSummary(stats.bestSet, ex)) : "—"}</strong></div><div class="metric"><span class="meta">Best session volume</span><strong>${stats.bestVolume ? Math.round(unitWeight(stats.bestVolume)) : "—"}</strong><span class="small muted">${weightUnit()}-reps</span></div><div class="metric"><span class="meta">Sessions logged</span><strong>${stats.sessions}</strong></div></section>
       <section class="card"><div class="section-title"><h2>Estimated 1RM</h2><span class="meta">${rangeLabel}</span></div><div class="chart">${lineChart(
         filtered(exerciseE1rmPoints(ex.id)).map((p) => ({ date: p.date, value: unitWeight(p.value) })),
@@ -3244,8 +3264,8 @@
         filtered(exercisePerformanceSeries(ex.id, "volume")).map((p) => ({ date: p.date, value: unitWeight(p.value) })),
         `${weightUnit()}-reps`,
       )}</div></section>
-      <section class="card"><div class="section-title"><h2>PR timeline</h2><span class="meta">All time</span></div><div class="list">${prTimeline.map((p) => `<div class="list-row"><div><strong>${esc(p.type)}</strong><div class="meta">${fmtDate(p.date)}</div></div><span class="pill good">${prDisplay(p)}</span></div>`).join("") || `<div class="empty">No PR history yet.</div>`}</div></section>
-      <section class="card"><div class="section-title"><h2>Exercise history</h2><span class="meta">Most recent 30 sessions</span></div><div class="list">${exerciseHistoryRows(ex.id)}</div></section>`
+      <section class="card"><div class="section-title"><h2>PR timeline</h2><span class="meta">All time · ${prTimeline.length}</span></div><div ${collapsibleAttrs("pr-timeline")}>${prTimeline.map((p) => `<div class="list-row"><div><strong>${esc(p.type)}</strong><div class="meta">${fmtDate(p.date)}</div></div><span class="pill good">${prDisplay(p)}</span></div>`).join("") || `<div class="empty">No PR history yet.</div>`}</div>${showAllButton("pr-timeline", prTimeline.length)}</section>
+      <section class="card"><div class="section-title"><h2>Exercise history</h2><span class="meta">Most recent 30 sessions</span></div>${collapsibleList("exercise-history", exerciseHistoryRows(ex.id))}</section>`
         : ""
     }`;
   }
@@ -3330,6 +3350,20 @@
       .forEach((s) => sessionPRs(s, exId).forEach((p) => out.push({ ...p, date: s.date, sessionId: s.id })));
     return out.sort((a, b) => b.date.localeCompare(a.date));
   }
+  // Long lists show their first 5 rows, with "Show all" to open the rest (remembered while the app is open).
+  const expandedLists = new Set();
+  function collapsibleAttrs(key) {
+    return `class="list collapsible ${expandedLists.has(key) ? "" : "collapsed"}" data-list="${key}"`;
+  }
+  function showAllButton(key, count) {
+    return count > 5
+      ? `<button class="btn ghost small-btn show-more" data-list="${key}" data-count="${count}" type="button" aria-expanded="${expandedLists.has(key)}">${expandedLists.has(key) ? "Show less" : `Show all ${count}`}</button>`
+      : "";
+  }
+  function collapsibleList(key, rowsHTML) {
+    const count = (rowsHTML.match(/class="list-row/g) || []).length;
+    return `<div ${collapsibleAttrs(key)}>${rowsHTML}</div>${showAllButton(key, count)}`;
+  }
   function exerciseHistoryRows(exId) {
     const ex = getExercise(exId);
     const arr = state.sessions
@@ -3402,12 +3436,12 @@
       bw = (v) => `${round1(unitWeight(v))} ${weightUnit()}`;
     return `<section class="card"><div class="row"><div><p class="eyebrow">Body measurements</p><h2>Track trends, not daily noise</h2></div><button class="btn primary" id="addBodyEntryBtn" type="button">+ Entry</button></div></section>
     <section class="grid-3 body-summary-grid"><div class="metric"><span class="meta">7-day weight average</span><strong>${bodyAverage("weight", 7) ? bw(bodyAverage("weight", 7)) : "—"}</strong></div><div class="metric"><span class="meta">Latest weight</span><strong>${latestBody("weight") ? bw(latestBody("weight").weight) : "—"}</strong></div><div class="metric"><span class="meta">Latest waist</span><strong>${latestBody("waist") ? `${round1(latestBody("waist").waist)} cm` : "—"}</strong></div></section>
-    <section class="card"><div class="section-title"><div><p class="eyebrow">Measurement trend</p><h2>${esc(metricName)}</h2></div>${latestMetric ? `<span class="pill ${metricChange == null ? "neutral" : metricChange <= 0 && metricKey === "waist" ? "good" : "neutral"}">${metricChange == null ? "Latest" : `${metricChange > 0 ? "+" : ""}${round1(metricChange)} ${metricUnit}`}</span>` : ""}</div><div class="analytics-top" style="margin-top:10px"><label>Measurement<select id="bodyMetricSelect">${visible
+    <section class="card"><div class="section-title"><div><p class="eyebrow">Measurement trend</p><h2>${nameHTML(metricName)}</h2></div>${latestMetric ? `<span class="pill ${metricChange == null ? "neutral" : metricChange <= 0 && metricKey === "waist" ? "good" : "neutral"}">${metricChange == null ? "Latest" : `${metricChange > 0 ? "+" : ""}${round1(metricChange)} ${metricUnit}`}</span>` : ""}</div><div class="analytics-top" style="margin-top:10px"><label>Measurement<select id="bodyMetricSelect">${visible
       .map((k) => {
         const [, n] = bodyFieldMeta(k);
         return `<option value="${k}" ${k === metricKey ? "selected" : ""}>${n}</option>`;
       })
-      .join("")}</select></label><div class="tabs">${[
+      .join("")}</select></label><div class="tabs seg">${[
       [30, "30D"],
       [90, "90D"],
       [365, "1Y"],
@@ -3420,7 +3454,7 @@
       .join(
         "",
       )}</div></div><div class="chart">${lineChart(metricPts, metricUnit)}</div>${latestMetric ? `<div class="note-box">Latest: ${round1(conv(latestMetric[metricKey]))} ${metricUnit} · ${fmtDate(latestMetric.date)}</div>` : ""}</section>
-    <section class="card"><div class="section-title"><h2>Measurement history</h2><span class="meta">Most recent 30 entries</span></div><div class="list">${
+    <section class="card"><div class="section-title"><h2>Measurement history</h2><span class="meta">Most recent 30 entries</span></div><div ${collapsibleAttrs("measurement-history")}>${
       entries
         .slice()
         .reverse()
@@ -3433,7 +3467,7 @@
               .join(" · ")}</div></div><span>›</span></div>`,
         )
         .join("") || `<div class="empty">No measurements yet.</div>`
-    }</div></section>`;
+    }</div>${showAllButton("measurement-history", Math.min(30, entries.length))}</section>`;
   }
   function latestBody(field) {
     return (
@@ -3657,9 +3691,9 @@
         ? unitWeight(v.target || 0)
         : v.target || "";
     openModal(
+      "Goals",
       g ? "Edit goal" : "New goal",
-      "Progress is calculated from your logged training data",
-      `<div class="stack"><label>Goal type<select id="goalType"><option value="exercise_e1rm" ${v.type === "exercise_e1rm" ? "selected" : ""}>Exercise estimated 1RM</option><option value="exercise_load" ${v.type === "exercise_load" ? "selected" : ""}>Exercise load</option><option value="weight" ${v.type === "weight" ? "selected" : ""}>Body weight</option><option value="waist" ${v.type === "waist" ? "selected" : ""}>Waist maximum</option><option value="weekly_workouts" ${v.type === "weekly_workouts" ? "selected" : ""}>Workouts per week</option><option value="muscle_effective" ${v.type === "muscle_effective" ? "selected" : ""}>Muscle effective sets · 4-week average</option><option value="adherence_4w" ${v.type === "adherence_4w" ? "selected" : ""}>4-week workout adherence</option></select></label><label id="goalExerciseWrap">Exercise<select id="goalExercise">${active.map((e) => `<option value="${e.id}" ${v.exerciseId === e.id ? "selected" : ""}>${esc(e.name)}</option>`).join("")}</select></label><label id="goalMuscleWrap">Muscle<select id="goalMuscle">${SEED.muscles.map((m) => `<option value="${m.id}" ${v.muscleId === m.id ? "selected" : ""}>${m.name}</option>`).join("")}</select></label><label><span id="goalTargetLabel">Target</span><input id="goalTarget" type="number" step="0.1" min="0" value="${initialTarget}"></label><label>Deadline <span class="meta">optional</span><input id="goalDeadline" type="date" value="${esc(v.deadline || "")}"></label><label>Goal name <span class="meta">optional</span><input id="goalName" value="${esc(v.name || "")}" placeholder="Generated automatically if blank"></label><div id="goalCurrentPreview" class="note-box"></div>${g ? `<button class="btn danger" id="deleteGoalBtn" type="button">Delete goal</button>` : ""}</div>`,
+      `<div class="stack"><p class="meta">Progress is calculated from your logged training data.</p><label>Goal type<select id="goalType"><option value="exercise_e1rm" ${v.type === "exercise_e1rm" ? "selected" : ""}>Exercise estimated 1RM</option><option value="exercise_load" ${v.type === "exercise_load" ? "selected" : ""}>Exercise load</option><option value="weight" ${v.type === "weight" ? "selected" : ""}>Body weight</option><option value="waist" ${v.type === "waist" ? "selected" : ""}>Waist maximum</option><option value="weekly_workouts" ${v.type === "weekly_workouts" ? "selected" : ""}>Workouts per week</option><option value="muscle_effective" ${v.type === "muscle_effective" ? "selected" : ""}>Muscle effective sets · 4-week average</option><option value="adherence_4w" ${v.type === "adherence_4w" ? "selected" : ""}>4-week workout adherence</option></select></label><label id="goalExerciseWrap">Exercise<select id="goalExercise">${active.map((e) => `<option value="${e.id}" ${v.exerciseId === e.id ? "selected" : ""}>${esc(e.name)}</option>`).join("")}</select></label><label id="goalMuscleWrap">Muscle<select id="goalMuscle">${SEED.muscles.map((m) => `<option value="${m.id}" ${v.muscleId === m.id ? "selected" : ""}>${m.name}</option>`).join("")}</select></label><label><span id="goalTargetLabel">Target</span><input id="goalTarget" type="number" step="0.1" min="0" value="${initialTarget}"></label><label>Deadline <span class="meta">optional</span><input id="goalDeadline" type="date" value="${esc(v.deadline || "")}"></label><label>Goal name <span class="meta">optional</span><input id="goalName" value="${esc(v.name || "")}" placeholder="Generated automatically if blank"></label><div id="goalCurrentPreview" class="note-box"></div>${g ? `<button class="btn danger" id="deleteGoalBtn" type="button">Delete goal</button>` : ""}</div>`,
       `<button class="btn primary" id="saveGoalBtn" type="button">${g ? "Save goal" : "Create goal"}</button>`,
     );
     const sync = () => {
@@ -3823,14 +3857,38 @@
   }
 
   // ---------- MORE / SETTINGS / DATA HEALTH ----------
+  // Settings rows: label on the left, a segmented choice or a switch on the right.
+  function settingSeg(label, id, options, current) {
+    return `<div class="setting-row"><span class="setting-label" id="${id}Label">${label}</span><div class="seg setting-seg" id="${id}" role="group" aria-labelledby="${id}Label">${options.map(([v, l]) => `<button type="button" class="${v === current ? "active" : ""}" data-value="${v}" aria-pressed="${v === current}">${l}</button>`).join("")}</div></div>`;
+  }
+  function settingSwitch(label, { id = "", cls = "", value = "" } = {}, checked = false) {
+    return `<label class="setting-row"><span class="setting-label">${label}</span><input type="checkbox" role="switch" class="switch ${cls}" ${id ? `id="${id}"` : ""} ${value ? `value="${value}"` : ""} ${checked ? "checked" : ""}></label>`;
+  }
+  function segValue(id) {
+    return byId(id)?.querySelector("button.active")?.dataset.value;
+  }
+  function wireSegs(root, onChange) {
+    root.querySelectorAll(".setting-seg").forEach((g) =>
+      g.querySelectorAll("button").forEach((b) =>
+        b.addEventListener("click", () => {
+          if (b.classList.contains("active")) return;
+          g.querySelectorAll("button").forEach((x) => {
+            x.classList.toggle("active", x === b);
+            x.setAttribute("aria-pressed", String(x === b));
+          });
+          onChange();
+        }),
+      ),
+    );
+  }
   function renderMore() {
     const issues = dataHealthIssues(),
-      lastBackup = state.meta.lastBackupAt ? new Date(state.meta.lastBackupAt).toLocaleString() : "Never",
+      lastBackup = state.meta.lastBackupAt ? fmtDateTime(state.meta.lastBackupAt) : "Never",
       trainMetrics = Array.isArray(state.settings.trainMetrics) ? state.settings.trainMetrics : ["weight", "waist"];
     view.innerHTML = `<div class="stack">
       <section class="card"><div class="section-title"><div><p class="eyebrow">Library</p><h2>Exercise Library</h2></div><button class="btn primary small-btn" id="moreAddExercise" type="button">+ Exercise</button></div><p class="meta">Create, edit, archive, and map exercises to muscles.</p><button class="btn ghost" id="moreOpenLibrary" type="button">Open library</button></section>
-      <section class="card"><div class="section-title"><div><p class="eyebrow">Personalization</p><h2>Appearance & display</h2></div><span class="pill neutral">v${APP_VERSION}</span></div><div class="form-grid" style="margin-top:12px"><label>Theme<select id="themeSetting"><option value="system" ${state.settings.theme === "system" ? "selected" : ""}>System</option><option value="light" ${state.settings.theme === "light" ? "selected" : ""}>Light</option><option value="dark" ${state.settings.theme === "dark" ? "selected" : ""}>Dark</option></select></label><label>Layout density<select id="densitySetting"><option value="comfortable" ${state.settings.density !== "compact" ? "selected" : ""}>Comfortable</option><option value="compact" ${state.settings.density === "compact" ? "selected" : ""}>Compact</option></select></label><label>Units<select id="unitsSetting"><option value="kg" ${state.settings.units === "kg" ? "selected" : ""}>kg</option><option value="lb" ${state.settings.units === "lb" ? "selected" : ""}>lb</option></select></label><label>Week starts<select id="weekSetting"><option value="monday" ${state.settings.weekStarts === "monday" ? "selected" : ""}>Monday</option><option value="sunday" ${state.settings.weekStarts === "sunday" ? "selected" : ""}>Sunday</option></select></label></div><div class="pref-group"><span class="pref-label">Train dashboard</span><div class="checks"><label class="check-chip"><input id="weekProgressSetting" type="checkbox" ${state.settings.showWeeklyProgress !== false ? "checked" : ""}><span>Weekly progress</span></label><label class="check-chip"><input class="train-metric-setting" type="checkbox" value="weight" ${trainMetrics.includes("weight") ? "checked" : ""}><span>Body weight</span></label><label class="check-chip"><input class="train-metric-setting" type="checkbox" value="waist" ${trainMetrics.includes("waist") ? "checked" : ""}><span>Waist</span></label></div></div></section>
-      <section class="card"><div><p class="eyebrow">Training defaults</p><h2>Logging behavior</h2></div><div class="form-grid" style="margin-top:12px"><label>New exercise rest (sec)<input id="defaultRestSetting" type="number" min="15" max="900" step="15" value="${Number.isFinite(Number(state.settings.defaultExerciseRest)) ? Number(state.settings.defaultExerciseRest) : 90}"></label><label>Secondary muscle credit<select id="secondaryMultiplierSetting"><option value="0.25" ${Number(state.settings.secondaryMultiplier) === 0.25 ? "selected" : ""}>25%</option><option value="0.5" ${Number(state.settings.secondaryMultiplier) === 0.5 ? "selected" : ""}>50%</option><option value="0.75" ${Number(state.settings.secondaryMultiplier) === 0.75 ? "selected" : ""}>75%</option></select></label></div><div class="checks" style="margin-top:10px"><label class="check-chip"><input id="rirSetting" type="checkbox" ${state.settings.trackRir ? "checked" : ""}><span>Track RIR</span></label><label class="check-chip"><input id="restSetting" type="checkbox" ${state.settings.autoRest ? "checked" : ""}><span>Auto rest timer</span></label><label class="check-chip"><input id="restSoundSetting" type="checkbox" ${state.settings.restSound !== false ? "checked" : ""}><span>Rest timer sound</span></label><label class="check-chip"><input id="keepAwakeSetting" type="checkbox" ${state.settings.keepAwake !== false ? "checked" : ""}><span>Keep screen on during workouts</span></label></div><p class="meta" style="margin-top:10px">Changes save automatically.</p></section>
+      <section class="card"><div class="section-title"><div><p class="eyebrow">Personalization</p><h2>Appearance & display</h2></div></div><div class="settings-list">${settingSeg("Theme", "themeSetting", [["system", "System"], ["light", "Light"], ["dark", "Dark"]], state.settings.theme || "system")}${settingSeg("Layout density", "densitySetting", [["comfortable", "Comfortable"], ["compact", "Compact"]], state.settings.density === "compact" ? "compact" : "comfortable")}${settingSeg("Units", "unitsSetting", [["kg", "kg"], ["lb", "lb"]], state.settings.units === "lb" ? "lb" : "kg")}${settingSeg("Week starts", "weekSetting", [["monday", "Monday"], ["sunday", "Sunday"]], state.settings.weekStarts === "sunday" ? "sunday" : "monday")}</div><p class="settings-subhead">Train dashboard</p><div class="settings-list">${settingSwitch("Weekly progress", { id: "weekProgressSetting" }, state.settings.showWeeklyProgress !== false)}${settingSwitch("Body weight", { cls: "train-metric-setting", value: "weight" }, trainMetrics.includes("weight"))}${settingSwitch("Waist", { cls: "train-metric-setting", value: "waist" }, trainMetrics.includes("waist"))}</div></section>
+      <section class="card"><div><p class="eyebrow">Training defaults</p><h2>Logging behavior</h2></div><div class="settings-list"><label class="setting-row"><span class="setting-label">Rest for new exercises<small>Seconds, 15–900</small></span><input id="defaultRestSetting" class="setting-input" type="number" inputmode="numeric" min="15" max="900" step="15" value="${Number.isFinite(Number(state.settings.defaultExerciseRest)) ? Number(state.settings.defaultExerciseRest) : 90}"></label>${settingSeg("Secondary muscle credit", "secondaryMultiplierSetting", [["0.25", "25%"], ["0.5", "50%"], ["0.75", "75%"]], String(Number(state.settings.secondaryMultiplier) || 0.5))}${settingSwitch("Track RIR", { id: "rirSetting" }, state.settings.trackRir)}${settingSwitch("Auto rest timer", { id: "restSetting" }, state.settings.autoRest)}${settingSwitch("Rest timer sound", { id: "restSoundSetting" }, state.settings.restSound !== false)}${settingSwitch("Keep screen on during workouts", { id: "keepAwakeSetting" }, state.settings.keepAwake !== false)}</div><p class="meta" style="margin-top:8px">Changes save automatically.</p></section>
       <section class="card"><div class="section-title"><div><p class="eyebrow">Data health</p><h2>Integrity & backups</h2></div><span class="pill ${issues.length ? "warn" : "good"}">${issues.length ? `${issues.length} issue${issues.length > 1 ? "s" : ""}` : "Healthy"}</span></div><div class="data-health-grid"><div class="health-stat"><span>Schema</span><strong>v${VERSION}</strong></div><div class="health-stat"><span>Sessions</span><strong>${state.sessions.length}</strong></div><div class="health-stat"><span>Exercises</span><strong>${Object.keys(state.exercises).length}</strong></div><div class="health-stat"><span>Last backup</span><strong class="health-backup-value">${esc(lastBackup)}</strong></div><div class="health-stat"><span>Storage used</span><strong>${storageText()}</strong></div></div>${
         issues.length
           ? `<div class="stack health-preview">${issues
@@ -3838,8 +3896,8 @@
               .map((x) => `<div class="health-issue"><strong>${esc(x.title)}</strong><br>${esc(x.text)}</div>`)
               .join("")}</div>`
           : `<div class="health-ok">No structural data problems detected.</div>`
-      }<div class="wrap" style="margin-top:12px"><button class="btn ghost" id="healthDetailsBtn" type="button">View integrity report</button><button class="btn ghost" id="exportBtn" type="button">Export backup</button><label class="btn ghost">Import backup<input class="hidden" id="importInput" type="file" accept="application/json,.json"></label></div>${hasUndoCopy() ? `<div class="note-box" style="margin-top:12px">An undo copy from your last import or reset is kept on this device.<div class="wrap" style="margin-top:8px"><button class="btn ghost small-btn" id="undoImportBtn" type="button">Restore previous data</button><button class="btn ghost small-btn" id="discardUndoBtn" type="button">Delete undo copy</button></div></div>` : ""}</section>
-      <section class="card"><h2>Training configuration</h2><div class="settings-actions"><button class="btn ghost" id="editTargetsBtn" type="button">Muscle targets</button><button class="btn ghost" id="editBodyFieldsBtn" type="button">Body fields</button><button class="btn ghost" id="plateCalcBtn" type="button">Plate calculator</button><button class="btn ghost" id="warmupCalcBtn" type="button">Warm-up calculator</button></div></section>
+      }<div class="button-grid"><button class="btn ghost" id="exportBtn" type="button">Export backup</button><label class="btn ghost">Import backup<input class="hidden" id="importInput" type="file" accept="application/json,.json"></label><button class="btn ghost span-all" id="healthDetailsBtn" type="button">View integrity report</button></div>${hasUndoCopy() ? `<div class="note-box" style="margin-top:12px">An undo copy from your last import or reset is kept on this device.<div class="wrap" style="margin-top:8px"><button class="btn ghost small-btn" id="undoImportBtn" type="button">Restore previous data</button><button class="btn ghost small-btn" id="discardUndoBtn" type="button">Delete undo copy</button></div></div>` : ""}</section>
+      <section class="card"><div><p class="eyebrow">Training</p><h2>Training configuration</h2></div><div class="nav-list"><button class="nav-row" id="editTargetsBtn" type="button"><span>Muscle targets<small>Weekly effective sets per muscle</small></span></button><button class="nav-row" id="editBodyFieldsBtn" type="button"><span>Body fields<small>Which measurements you log</small></span></button><button class="nav-row" id="plateCalcBtn" type="button"><span>Plate calculator<small>Plates per side for a target load</small></span></button><button class="nav-row" id="warmupCalcBtn" type="button"><span>Warm-up calculator<small>Ramp-up sets to your working weight</small></span></button></div></section>
       ${preUpgradeNote()}
       ${store.get(MIGRATION_BACKUP_KEY) ? `<section class="card"><h2>Legacy migration</h2><p class="meta">Original V1 data is retained separately as a migration safety copy.</p><button class="btn ghost" id="legacyBackupBtn" type="button">Download V1 migration backup</button></section>` : ""}
       <section class="card"><div class="section-title"><div><p class="eyebrow">About</p><h2>Strength OS</h2></div><span class="pill neutral">v${APP_VERSION}</span></div><p class="meta">Local-first workout tracking · Data schema v${VERSION} · no account or cloud backend required.</p></section>
@@ -3851,17 +3909,17 @@
     byId("warmupCalcBtn").addEventListener("click", openWarmupCalculator);
     // Every setting saves and applies the moment it changes (no Save button to hunt for).
     const saveSettings = () => {
-      state.settings.theme = byId("themeSetting").value;
-      state.settings.density = byId("densitySetting").value;
-      state.settings.units = byId("unitsSetting").value;
-      state.settings.weekStarts = byId("weekSetting").value;
+      state.settings.theme = segValue("themeSetting");
+      state.settings.density = segValue("densitySetting");
+      state.settings.units = segValue("unitsSetting");
+      state.settings.weekStarts = segValue("weekSetting");
       state.settings.trackRir = byId("rirSetting").checked;
       state.settings.restSound = byId("restSoundSetting").checked;
       state.settings.keepAwake = byId("keepAwakeSetting").checked;
       if (!state.settings.keepAwake) releaseWakeLock();
       state.settings.autoRest = byId("restSetting").checked;
       state.settings.defaultExerciseRest = clamp(byId("defaultRestSetting").value, 15, 900) ?? 90;
-      state.settings.secondaryMultiplier = Number(byId("secondaryMultiplierSetting").value) || 0.5;
+      state.settings.secondaryMultiplier = Number(segValue("secondaryMultiplierSetting")) || 0.5;
       state.settings.showWeeklyProgress = byId("weekProgressSetting").checked;
       state.settings.trainMetrics = [...document.querySelectorAll(".train-metric-setting:checked")].map((x) => x.value);
       save();
@@ -3869,19 +3927,15 @@
       showToast("Saved.");
     };
     [
-      "#themeSetting",
-      "#densitySetting",
-      "#unitsSetting",
-      "#weekSetting",
       "#rirSetting",
       "#restSetting",
       "#restSoundSetting",
       "#keepAwakeSetting",
       "#defaultRestSetting",
-      "#secondaryMultiplierSetting",
       "#weekProgressSetting",
       ".train-metric-setting",
     ].forEach((q) => document.querySelectorAll(q).forEach((el) => el.addEventListener("change", saveSettings)));
+    wireSegs(view, saveSettings);
     byId("editTargetsBtn").addEventListener("click", openMuscleTargetsModal);
     byId("editBodyFieldsBtn").addEventListener("click", openBodyFieldsModal);
     byId("healthDetailsBtn").addEventListener("click", openDataHealthReport);
@@ -3990,6 +4044,9 @@
     });
   }
 
+  function dayText(d) {
+    return /^\d{4}-\d{2}-\d{2}$/.test(d || "") ? fmtDate(d, { month: "short", day: "numeric", year: "numeric" }) : String(d || "an unknown date");
+  }
   function dataHealthIssues() {
     const issues = [],
       sessionIds = new Set(),
@@ -4012,40 +4069,40 @@
       if (!/^\d{4}-\d{2}-\d{2}$/.test(s.date || ""))
         issues.push({ title: "Invalid session date", text: `${s.name || "A session"} has an invalid date.` });
       if (s.startTime && s.endTime && s.endTime < s.startTime)
-        issues.push({ title: "Invalid session duration", text: `${s.name} on ${s.date} ends before it starts.` });
+        issues.push({ title: "Invalid session duration", text: `${s.name} on ${dayText(s.date)} ends before it starts.` });
       if (s.startTime && s.endTime && s.endTime - s.startTime > 6 * 3600000)
         issues.push({
           title: "Unusually long workout",
-          text: `${s.name} on ${s.date} lasted ${durationText((s.endTime - s.startTime) / 1000)}. Open it from History → Edit workout → Date & duration to correct it.`,
+          text: `${s.name} on ${dayText(s.date)} lasted ${durationText((s.endTime - s.startTime) / 1000)}. Open it from History → Edit workout → Date & duration to correct it.`,
         });
       if (s.status === "in_progress" && s.id !== state.currentWorkoutId)
         issues.push({
           title: "Unfinished workout",
-          text: `${s.name} on ${s.date} was never finished. Resume or discard it from the Train tab.`,
+          text: `${s.name} on ${dayText(s.date)} was never finished. Resume or discard it from the Train tab.`,
         });
       (s.items || []).forEach((i) => {
         if (!state.exercises[i.exerciseId] && !i.exerciseSnapshot)
           issues.push({
             title: "Missing exercise reference",
-            text: `A workout on ${s.date} references ${i.exerciseId}.`,
+            text: `A workout on ${dayText(s.date)} references ${i.exerciseId}.`,
           });
         (i.sets || []).forEach((st) => {
           if (st.rir != null && (st.rir < 0 || st.rir > 5))
-            issues.push({ title: "Invalid RIR", text: `${s.date} contains RIR ${st.rir}.` });
+            issues.push({ title: "Invalid RIR", text: `${dayText(s.date)} contains RIR ${st.rir}.` });
           if (st.loadKg < 0 || st.reps < 0 || st.durationSec < 0 || st.distanceKm < 0)
             issues.push({
               title: "Negative set value",
-              text: `${s.date} contains a negative load, rep, duration, or distance value.`,
+              text: `${dayText(s.date)} contains a negative load, rep, duration, or distance value.`,
             });
           if (st.loadKg > 1000)
             issues.push({
               title: "Unusually high load",
-              text: `${s.date} contains ${round1(st.loadKg)} kg. Verify this entry.`,
+              text: `${dayText(s.date)} contains ${round1(st.loadKg)} kg. Verify this entry.`,
             });
           if (st.complete && st.type !== "warmup" && !st.reps && !st.durationSec && !st.distanceKm)
             issues.push({
               title: "Empty completed set",
-              text: `${s.date} contains a completed set without reps/duration/distance.`,
+              text: `${dayText(s.date)} contains a completed set without reps/duration/distance.`,
             });
         });
       });
@@ -4084,14 +4141,14 @@
       bodyDates.set(e.date, (bodyDates.get(e.date) || 0) + 1);
       bodyFields.forEach(([k, n]) => {
         if (e[k] != null && num(e[k]) <= 0)
-          issues.push({ title: "Invalid body measurement", text: `${n} on ${e.date} is not greater than zero.` });
+          issues.push({ title: "Invalid body measurement", text: `${n} on ${dayText(e.date)} is not greater than zero.` });
       });
     });
     bodyDates.forEach((count, date) => {
       if (count > 1)
         issues.push({
           title: "Multiple body entries on one date",
-          text: `${date} contains ${count} separate measurement entries. This is allowed, but verify it is intentional.`,
+          text: `${dayText(date)} contains ${count} separate measurement entries. This is allowed, but verify it is intentional.`,
         });
     });
     state.goals.forEach((g) => {
@@ -4109,10 +4166,10 @@
     openModal(
       "Muscle targets",
       "Weekly effective sets",
-      `<div class="form-grid">${SEED.muscles
+      `<p class="meta">Effective sets per week. Secondary muscles count at your secondary credit.</p><div class="targets-table"><div class="target-row target-head"><span>Muscle</span><span>Min</span><span></span><span>Max</span></div>${SEED.muscles
         .map((m) => {
           const t = state.settings.muscleTargets[m.id] || [0, 0];
-          return `<div class="form-grid"><label>${m.name} min<input id="target_${m.id}_min" type="number" min="0" max="40" value="${t[0]}"></label><label>${m.name} max<input id="target_${m.id}_max" type="number" min="0" max="50" value="${t[1]}"></label></div>`;
+          return `<div class="target-row"><span id="target_${m.id}_label">${m.name}</span><input id="target_${m.id}_min" type="number" inputmode="numeric" min="0" max="40" value="${t[0]}" aria-label="${m.name} minimum"><span aria-hidden="true">–</span><input id="target_${m.id}_max" type="number" inputmode="numeric" min="0" max="50" value="${t[1]}" aria-label="${m.name} maximum"></div>`;
         })
         .join("")}</div>`,
       `<button class="btn primary" id="saveTargetsBtn" type="button">Save targets</button>`,
@@ -4322,6 +4379,21 @@
   }
   function closeModal() {
     if (modal.open) modal.close();
+  }
+  // A short list of actions in a pop-up, used instead of rows of small buttons.
+  // actions: [label, run, disabled?, danger?]
+  function openActionSheet(eyebrow, title, actions) {
+    openModal(
+      eyebrow,
+      title,
+      `<div class="action-sheet">${actions.map(([label, , disabled, danger], i) => `<button class="btn ${danger ? "danger" : "ghost"}" data-action-i="${i}" type="button" ${disabled ? "disabled" : ""}>${esc(label)}</button>`).join("")}</div>`,
+    );
+    modalBody.querySelectorAll("[data-action-i]").forEach((b) =>
+      b.addEventListener("click", () => {
+        closeModal();
+        actions[Number(b.dataset.actionI)][1]();
+      }),
+    );
   }
   function openTextModal(title, value, onSave) {
     openModal(

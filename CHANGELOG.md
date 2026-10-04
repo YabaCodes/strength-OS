@@ -1,3 +1,26 @@
+## v2.10.0 — Layout and polish
+
+Fixed
+- Progress cards no longer sit on top of each other: every screen now uses the same 14 px gap between cards (Progress had none).
+- The Progress section tabs fit the screen; "Goals" used to be cut off. Same for the filters in the exercise library.
+- On a logged set, the "Previous …" line and the PR badge no longer collide; the badge moves to its own line when needed.
+- The rest timer no longer covers the last buttons of a workout; the page leaves room for it.
+- Messages ("Saved.", PRs, "Workout paused") appear at the top of the screen instead of over the buttons you're tapping.
+- Labels stay on one line: "0/5 this week", "+ Program"; names like "5-Day" or "Single-Arm" no longer break at the hyphen.
+- Stat tiles never leave a half-empty row: three tiles share one row, and an odd last tile spans the row.
+- On small phones (320–375 px), the set buttons and the Technique/Pain row stay inside their card.
+
+Calmer screens
+- Programs: tap an exercise to edit it; one ⋯ menu per exercise and per day (Edit, Move up, Move down, Duplicate) replaces four small buttons on every row.
+- More: settings are compact rows — Theme, Layout density, Units, Week starts and Secondary muscle credit as segmented choices (the same switch style as Wealth OS), and on/off options as switches. Training configuration is a list of rows.
+- Muscle targets: one row per muscle with min and max side by side, instead of 34 stacked boxes.
+- Long lists (measurement history, PR timeline, exercise history) show 5 rows with "Show all".
+- Data health shows dates as "Oct 5, 2026", and a shorter "Last backup"; its buttons sit in a tidy grid.
+- The new-goal pop-up is titled "New goal".
+- One text-size scale and spacing scale across screens and pop-ups.
+
+No change to your data or how anything is calculated.
+
 ## v2.9.0 — Storage moved to IndexedDB
 
 - Your workouts are now saved in IndexedDB instead of localStorage. localStorage stops accepting changes at about 5 MB, which is roughly 3–4 years of logging; IndexedDB has room for many years. Tested with 7 years of history (about 8 MB), which v2.8.1 could not save.

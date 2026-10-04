@@ -156,6 +156,17 @@ Since v2.9.0 the data is saved in the browser's IndexedDB (database `strength-os
 - localStorage keeps only small helpers: `strengthOSPrefs` (theme and density, so dark mode is applied before the first paint), `strengthOSStorage` (records that the data moved, and when), and `strengthOSRestTimer` (a running rest timer).
 - If a browser can't use IndexedDB at all, the app keeps using localStorage as before. If the data has already moved but IndexedDB can't be opened, the app shows a banner and saves nothing until it opens again, so an empty profile is never written over your data.
 
+## Layout rules (v2.10.0)
+
+So screens stay consistent as features are added, the last block of `styles.css` defines the shared rules:
+
+- `--gap` (14 px; 8 px in Compact) between cards on every screen, `--tile-gap` (10 px) between tiles and rows inside a card. Put cards in a `.stack`.
+- Stat tiles: `.grid-3` with three tiles stays one row; other odd counts make the last tile span the row.
+- Choices use the segmented control (`.seg`), on/off options use switches (`input.switch` in a `.setting-row`), links to sub-screens use `.nav-row`.
+- Several actions on one row go into a ⋯ menu (`openActionSheet`) rather than a row of small buttons.
+- Lists longer than 5 rows use `collapsibleAttrs` / `showAllButton`.
+- Headings that show a name use `nameHTML()` so hyphenated words like "5-Day" don't break.
+
 ## Notes
 
 - The body heat map is intentionally a **schematic training visualization**, not a medical/anatomical illustration.
