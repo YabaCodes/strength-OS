@@ -1,3 +1,16 @@
+## v2.3.0
+- Reworked the live workout logger for faster in-gym use.
+- Programmed exercises now pre-fill load/reps from the corresponding previous session while remaining incomplete until confirmed.
+- Added per-set previous-performance lines directly below each current set.
+- Replaced the small checkbox with a larger tap-friendly Done control.
+- Added immediate Weight / Rep / estimated-1RM PR feedback when a set is completed.
+- Added a Next incomplete exercise shortcut in the live workout header.
+- Improved superset behavior: rest starts only after the matching set is complete across the entire superset group, regardless of completion order.
+- Added clearer superset linking and visual grouping.
+- Rest timer now supports −30 sec, +30 sec, and Skip without leaving the workout.
+- New sets inherit the most recent current-session load/reps; substitutions reset and intelligently pre-fill from the replacement exercise's history.
+- No logo, app-icon, or other asset files changed in this revision.
+
 ## v2.2.0
 - Matured the Exercise Library with active/custom/built-in/archived filters, muscle filtering, program/history usage counts, exercise detail view, duplicate/archive/restore controls, and safe deletion rules for custom exercises.
 - Custom exercises created from an exercise picker now return directly into the original add/substitute workflow instead of dropping the task.

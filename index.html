@@ -83,8 +83,12 @@
 
     <div id="toast" class="toast" role="status" aria-live="polite"></div>
     <div id="restTimer" class="rest-timer hidden" aria-live="polite">
-      <div><strong id="restTimerLabel">Rest</strong><span id="restTimerValue">01:30</span></div>
-      <button id="cancelTimer" type="button">Stop</button>
+      <div class="rest-copy"><strong id="restTimerLabel">Rest</strong><span id="restTimerValue">01:30</span></div>
+      <div class="rest-controls" aria-label="Rest timer controls">
+        <button id="restMinusBtn" type="button" aria-label="Subtract 30 seconds">−30</button>
+        <button id="restPlusBtn" type="button" aria-label="Add 30 seconds">+30</button>
+        <button id="cancelTimer" type="button">Skip</button>
+      </div>
     </div>
 
     <dialog id="modal" class="modal">
