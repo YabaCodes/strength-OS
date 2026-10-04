@@ -4,8 +4,17 @@
   const KEY = "strengthOSV2";
   const LEGACY_KEY = "strengthProteinTrackerV1";
   const MIGRATION_BACKUP_KEY = "strengthOSMigrationBackupV1";
+  const PRE_IMPORT_KEY = "strengthOSPreImportBackup";
+  const REST_KEY = "strengthOSRestTimer";
+  // Since v2.9.0 your data lives in IndexedDB. localStorage only keeps small helpers:
+  const STORAGE_MARK_KEY = "strengthOSStorage"; // where the data lives + when it moved
+  const PRE_UPGRADE_KEY = "strengthOSV2PreUpgrade"; // IndexedDB: safety copy from the move, removed after 30 days
+  const PREFS_KEY = "strengthOSPrefs"; // theme + density, read before the first paint (index.html)
+  const DB_NAME = "strength-os",
+    DB_STORE = "kv";
+  const PRE_UPGRADE_DAYS = 30;
   const VERSION = 3;
-  const APP_VERSION = "2.8.1"; // Bump together with VERSION in sw.js.
+  const APP_VERSION = "2.9.0"; // Bump together with VERSION in sw.js.
   const trackingTypes = [
     ["weight_reps", "Weight + reps"],
     ["bodyweight_reps", "Bodyweight + reps"],
@@ -59,7 +68,7 @@
     recoveryRaw = null,
     saveFailed = false,
     updateReady = false;
-  let state = loadState();
+  let state = null; // loaded in boot()
   let activeView = "train";
   let progressTab = "overview";
   let historyMonth = startOfMonth(isoToday());
@@ -71,7 +80,7 @@
   let librarySearch = "";
   let libraryMuscle = "all",
     libraryScope = "active";
-  let selectedProgramId = state.settings.activeProgramId;
+  let selectedProgramId = null;
   let selectedExerciseAnalyticsId = "bench";
   let selectedMuscleTrendId = "chest";
   let muscleTrendWeeks = 8;
@@ -88,11 +97,355 @@
     lastTouchedItemId = null;
   let wakeLock = null,
     audioCtx = null;
-  const REST_KEY = "strengthOSRestTimer";
-  const PRE_IMPORT_KEY = "strengthOSPreImportBackup";
   let indexCache = null; // see historyIndex()
 
-  init();
+  // Listeners that must be in place before saved data finishes loading, so these one-off events aren't missed.
+  function early() {
+    window.addEventListener("beforeinstallprompt", (e) => {
+      e.preventDefault();
+      deferredInstallPrompt = e;
+      byId("installBtn").classList.remove("hidden");
+    });
+    if ("serviceWorker" in navigator) {
+      const hadController = !!navigator.serviceWorker.controller;
+      navigator.serviceWorker.register("./sw.js").catch(() => {});
+      navigator.serviceWorker.addEventListener("controllerchange", () => {
+        if (!hadController) return;
+        updateReady = true;
+        renderBanner();
+      });
+    }
+  }
+  async function boot() {
+    try {
+      await openStore();
+    } catch (e) {
+      console.warn("Storage setup failed", e);
+    }
+    state = loadState();
+    selectedProgramId = state.settings.activeProgramId;
+    if (!recoveryRaw && !storageBlocked && !dataMissing) mirrorPrefs();
+    init();
+  }
+
+  // ---------- STORAGE ----------
+  // The app works on an in-memory copy of your data and writes every change straight to IndexedDB, which has no
+  // ~5 MB limit. If a browser can't use IndexedDB at all, the app keeps using localStorage as before.
+  const mem = new Map(),
+    dirty = new Set();
+  let backend = "local",
+    db = null,
+    commitQueued = false,
+    flushing = false,
+    storageBlocked = false,
+    dataMissing = false, // data had moved to IndexedDB but none was found there
+    storageMark = null;
+
+  const store = {
+    get(k) {
+      if (backend !== "idb") return localStorage.getItem(k);
+      return mem.has(k) ? mem.get(k) : null;
+    },
+    // localStorage mode: throws when storage is full, exactly as before.
+    // IndexedDB mode: all changes from one tap are saved together in one transaction, started before the tap is
+    // over, so closing the app right after still keeps them. A failure shows the "Changes aren't being saved"
+    // banner and is retried.
+    set(k, v) {
+      if (backend !== "idb") return localStorage.setItem(k, v);
+      mem.set(k, v);
+      queueCommit(k);
+    },
+    remove(k) {
+      if (backend !== "idb") return localStorage.removeItem(k);
+      mem.delete(k);
+      queueCommit(k);
+    },
+  };
+  function lsGet(k) {
+    try {
+      return localStorage.getItem(k);
+    } catch {
+      return null;
+    }
+  }
+  function lsSet(k, v) {
+    try {
+      localStorage.setItem(k, v);
+      return true;
+    } catch {
+      return false;
+    }
+  }
+  function lsRemove(k) {
+    try {
+      localStorage.removeItem(k);
+    } catch {}
+  }
+  function withTimeout(promise, ms, what) {
+    let timer;
+    const late = new Promise((_, reject) => {
+      timer = setTimeout(() => reject(new Error(`${what} took too long`)), ms);
+    });
+    return Promise.race([promise, late]).finally(() => clearTimeout(timer));
+  }
+  function closeDb() {
+    try {
+      db?.close();
+    } catch {}
+    db = null;
+  }
+
+  function openDb() {
+    return new Promise((resolve, reject) => {
+      let settled = false;
+      const fail = (e) => {
+        if (settled) return;
+        settled = true;
+        reject(e || new Error("IndexedDB could not be opened"));
+      };
+      const timer = setTimeout(() => fail(new Error("IndexedDB took too long to open")), 4000);
+      let req;
+      try {
+        req = indexedDB.open(DB_NAME, 1);
+      } catch (e) {
+        clearTimeout(timer);
+        return fail(e);
+      }
+      req.onupgradeneeded = () => {
+        if (!req.result.objectStoreNames.contains(DB_STORE)) req.result.createObjectStore(DB_STORE);
+      };
+      req.onsuccess = () => {
+        clearTimeout(timer);
+        const d = req.result;
+        if (settled) return d.close();
+        settled = true;
+        // If the browser drops the connection (iOS sometimes does), the next write opens a new one.
+        d.onversionchange = () => {
+          d.close();
+          if (db === d) db = null;
+        };
+        d.onclose = () => {
+          if (db === d) db = null;
+        };
+        resolve(d);
+      };
+      req.onerror = () => {
+        clearTimeout(timer);
+        fail(req.error);
+      };
+    });
+  }
+  async function idbReadAll() {
+    if (!db) db = await openDb();
+    const read = new Promise((resolve, reject) => {
+      const out = new Map(),
+        tx = db.transaction(DB_STORE, "readonly"),
+        req = tx.objectStore(DB_STORE).openCursor();
+      req.onsuccess = () => {
+        const c = req.result;
+        if (!c) return;
+        out.set(c.key, c.value);
+        c.continue();
+      };
+      tx.oncomplete = () => resolve(out);
+      tx.onerror = tx.onabort = () => reject(tx.error || new Error("Read failed"));
+    });
+    return withTimeout(read, 8000, "Reading saved data");
+  }
+  // All entries in one transaction: either every one is saved or none is.
+  async function idbWrite(entries) {
+    if (!db) db = await openDb();
+    const write = new Promise((resolve, reject) => {
+      const tx = db.transaction(DB_STORE, "readwrite"),
+        os = tx.objectStore(DB_STORE);
+      entries.forEach(([k, v]) => (v == null ? os.delete(k) : os.put(v, k)));
+      tx.oncomplete = () => resolve();
+      tx.onerror = tx.onabort = () => reject(tx.error || new Error("Write failed"));
+    });
+    return withTimeout(write, 10000, "Saving");
+  }
+
+  function queueCommit(k) {
+    dirty.add(k);
+    if (commitQueued) return;
+    commitQueued = true;
+    queueMicrotask(commitNow); // runs as soon as the current tap's code finishes, before anything else
+  }
+  // The browser runs these transactions in the order they were started, and each writes the latest value of every
+  // changed key, so an older value can never overwrite a newer one.
+  function commitNow() {
+    commitQueued = false;
+    if (!dirty.size) return;
+    if (flushing || !db) return scheduleFlush();
+    const keys = [...dirty];
+    dirty.clear();
+    let tx;
+    try {
+      tx = db.transaction(DB_STORE, "readwrite");
+      const os = tx.objectStore(DB_STORE);
+      keys.forEach((key) => (mem.has(key) ? os.put(mem.get(key), key) : os.delete(key)));
+      if (tx.commit) tx.commit();
+    } catch {
+      try {
+        tx?.abort();
+      } catch {}
+      keys.forEach((key) => dirty.add(key));
+      return scheduleFlush();
+    }
+    // A save that hasn't finished after 10 seconds is treated as failed and retried the slow way.
+    const watchdog = setTimeout(() => {
+      tx.oncomplete = tx.onabort = null;
+      try {
+        tx.abort();
+      } catch {}
+      keys.forEach((key) => dirty.add(key));
+      scheduleFlush();
+    }, 10000);
+    tx.oncomplete = () => {
+      clearTimeout(watchdog);
+      if (saveFailed && !dirty.size && !flushing) savesWorkAgain();
+    };
+    tx.onabort = () => {
+      clearTimeout(watchdog);
+      keys.forEach((key) => dirty.add(key)); // retried with the latest value of each
+      scheduleFlush();
+    };
+  }
+  function scheduleFlush() {
+    if (flushing) return;
+    flushing = true;
+    Promise.resolve().then(flush);
+  }
+  // Slow path: reconnect if needed and retry. If saving still fails, show the banner and keep an emergency copy in
+  // localStorage; the next launch moves it back into IndexedDB.
+  async function flush() {
+    let retried = false;
+    while (dirty.size) {
+      const keys = [...dirty];
+      dirty.clear();
+      try {
+        await idbWrite(keys.map((k) => [k, mem.has(k) ? mem.get(k) : null]));
+        retried = false;
+        if (saveFailed && !dirty.size) savesWorkAgain();
+      } catch (e) {
+        keys.forEach((k) => dirty.add(k));
+        if (!retried) {
+          retried = true;
+          closeDb();
+          continue;
+        }
+        console.warn("Save failed", e);
+        saveFailed = true;
+        if (mem.has(KEY)) lsSet(KEY, mem.get(KEY));
+        renderBanner();
+        break; // the next change tries again
+      }
+    }
+    flushing = false;
+  }
+  function savesWorkAgain() {
+    saveFailed = false;
+    lsRemove(KEY); // the emergency copy is no longer needed
+    renderBanner();
+  }
+
+  function metaOf(text) {
+    try {
+      const m = JSON.parse(text)?.meta || {};
+      return { created: m.createdAt ?? null, saved: Number(m.updatedAt) || 0 };
+    } catch {
+      return { created: null, saved: 0 };
+    }
+  }
+  async function openStore() {
+    try {
+      storageMark = JSON.parse(lsGet(STORAGE_MARK_KEY) || "null");
+    } catch {}
+    const movedToIdb = storageMark?.backend === "indexeddb";
+    if (!window.indexedDB) {
+      // Your data is in IndexedDB but this browser can't open it now: don't start an empty profile on top of it.
+      if (movedToIdb) storageBlocked = true;
+      return;
+    }
+    let saved;
+    try {
+      try {
+        db = await openDb();
+      } catch {
+        db = await openDb(); // one retry; iOS occasionally fails the first open after launch
+      }
+      saved = await idbReadAll();
+    } catch (e) {
+      console.warn("IndexedDB unavailable", e);
+      closeDb();
+      if (movedToIdb) storageBlocked = true;
+      return; // otherwise keep using localStorage
+    }
+
+    // Move what's in localStorage. Normally this happens once, on the first launch of v2.9.0. Later it only picks
+    // up a newer version of the same data (saved by an older copy of the app that was still open, or the emergency
+    // copy from a failed save), never a different or empty profile. Whichever version isn't kept becomes the
+    // 30-day safety copy.
+    const lsData = lsGet(KEY),
+      idbData = saved.get(KEY) ?? null,
+      moves = [];
+    if (lsData != null && lsData !== idbData) {
+      const fromLs = metaOf(lsData),
+        inIdb = metaOf(idbData);
+      const lsWins =
+        idbData == null || (fromLs.created != null && fromLs.created === inIdb.created && fromLs.saved >= inIdb.saved);
+      moves.push([PRE_UPGRADE_KEY, lsWins ? (idbData ?? lsData) : lsData]);
+      if (lsWins) moves.push([KEY, lsData]);
+    }
+    for (const k of [PRE_IMPORT_KEY, MIGRATION_BACKUP_KEY]) {
+      const v = lsGet(k);
+      if (v != null && !saved.has(k)) moves.push([k, v]);
+    }
+    try {
+      if (moves.length) {
+        await idbWrite(moves);
+        // Read everything back and compare before removing anything from localStorage.
+        const check = await idbReadAll();
+        if (moves.some(([k, v]) => check.get(k) !== v)) throw new Error("The copy in IndexedDB didn't match");
+        moves.forEach(([k, v]) => saved.set(k, v));
+      }
+    } catch (e) {
+      console.warn("Moving data to IndexedDB failed; staying on localStorage for now", e);
+      closeDb();
+      if (movedToIdb) storageBlocked = true;
+      return;
+    }
+    if (lsData != null) lsRemove(KEY);
+    for (const k of [PRE_IMPORT_KEY, MIGRATION_BACKUP_KEY]) if (saved.has(k)) lsRemove(k);
+    const newCopy = moves.some(([k]) => k === PRE_UPGRADE_KEY);
+    if (!movedToIdb || newCopy || (saved.has(PRE_UPGRADE_KEY) && !storageMark?.movedAt)) {
+      storageMark = { backend: "indexeddb", movedAt: newCopy || !storageMark?.movedAt ? Date.now() : storageMark.movedAt };
+      lsSet(STORAGE_MARK_KEY, JSON.stringify(storageMark));
+    }
+    saved.forEach((v, k) => mem.set(k, v));
+    backend = "idb";
+    // Nothing found where your data should be. Start empty, but don't save until you change something, so a
+    // read that wrongly came back empty can't overwrite anything.
+    dataMissing = movedToIdb && !saved.has(KEY);
+    if (mem.has(PRE_UPGRADE_KEY) && Date.now() - storageMark.movedAt > PRE_UPGRADE_DAYS * 864e5)
+      store.remove(PRE_UPGRADE_KEY);
+  }
+  function mirrorPrefs() {
+    const v = JSON.stringify({ theme: state.settings.theme, density: state.settings.density });
+    if (mirrorPrefs.last === v) return;
+    if (lsSet(PREFS_KEY, v)) mirrorPrefs.last = v;
+  }
+  function preUpgradeCopy() {
+    const text = backend === "idb" ? mem.get(PRE_UPGRADE_KEY) : null;
+    return text && storageMark?.movedAt ? { text, until: new Date(storageMark.movedAt + PRE_UPGRADE_DAYS * 864e5) } : null;
+  }
+  // While saved data can't be opened, anything that replaces or restores data is turned off, so a placeholder
+  // profile can't end up in the undo copy.
+  function dataLocked() {
+    if (!recoveryRaw && !storageBlocked) return false;
+    showToast("Your saved data couldn't be opened, so this is turned off until it opens.");
+    return true;
+  }
 
   function init() {
     byId("todayLabel").textContent = new Date().toLocaleDateString(undefined, {
@@ -115,11 +468,6 @@
     byId("restMinusBtn").addEventListener("click", () => adjustRestTimer(-30));
     byId("restPlusBtn").addEventListener("click", () => adjustRestTimer(30));
     byId("quickWeightBtn").addEventListener("click", () => openBodyEntryModal(isoToday(), "weight"));
-    window.addEventListener("beforeinstallprompt", (e) => {
-      e.preventDefault();
-      deferredInstallPrompt = e;
-      byId("installBtn").classList.remove("hidden");
-    });
     byId("installBtn").addEventListener("click", async () => {
       if (!deferredInstallPrompt) return;
       deferredInstallPrompt.prompt();
@@ -157,15 +505,6 @@
       if (live && !live.endTime) requestWakeLock();
     });
     if (navigator.storage?.persist) navigator.storage.persist().catch(() => {});
-    if ("serviceWorker" in navigator) {
-      const hadController = !!navigator.serviceWorker.controller;
-      navigator.serviceWorker.register("./sw.js").catch(() => {});
-      navigator.serviceWorker.addEventListener("controllerchange", () => {
-        if (!hadController) return;
-        updateReady = true;
-        renderBanner();
-      });
-    }
     renderBanner();
     restoreRestTimer();
     render();
@@ -206,21 +545,22 @@
   }
 
   function loadState() {
+    if (storageBlocked) return newState(); // read-only until the saved data can be opened again
     let raw = null;
     try {
-      raw = localStorage.getItem(KEY);
+      raw = store.get(KEY);
       if (raw) {
         const original = JSON.parse(raw),
           normalized = normalizeState(migrateStateSchema(original));
         backfillGoalBaselines(normalized);
-        if (Number(original.version) !== VERSION) localStorage.setItem(KEY, JSON.stringify(normalized));
+        if (Number(original.version) !== VERSION) store.set(KEY, JSON.stringify(normalized));
         return normalized;
       }
-      const legacy = localStorage.getItem(LEGACY_KEY);
+      const legacy = lsGet(LEGACY_KEY); // the V1 tracker's own data stays where it was
       if (legacy) {
-        localStorage.setItem(MIGRATION_BACKUP_KEY, legacy);
+        store.set(MIGRATION_BACKUP_KEY, legacy);
         const migrated = migrateLegacy(JSON.parse(legacy));
-        localStorage.setItem(KEY, JSON.stringify(migrated));
+        store.set(KEY, JSON.stringify(migrated));
         return migrated;
       }
     } catch (e) {
@@ -233,7 +573,7 @@
     }
     const s = newState();
     try {
-      localStorage.setItem(KEY, JSON.stringify(s));
+      if (!dataMissing) store.set(KEY, JSON.stringify(s));
     } catch {}
     return s;
   }
@@ -372,14 +712,19 @@
 
   function save() {
     dataRev++;
-    if (recoveryRaw) {
+    if (recoveryRaw || storageBlocked) {
       renderBanner();
       return false;
     }
     state.meta.updatedAt = Date.now();
+    if (dataMissing) {
+      dataMissing = false;
+      renderBanner();
+    }
     try {
-      localStorage.setItem(KEY, JSON.stringify(state));
-      if (saveFailed) {
+      store.set(KEY, JSON.stringify(state));
+      mirrorPrefs();
+      if (backend !== "idb" && saveFailed) {
         saveFailed = false;
         renderBanner();
       }
@@ -393,7 +738,8 @@
   }
   function storageBytes() {
     try {
-      return (localStorage.getItem(KEY) || "").length * 2;
+      // localStorage counts 2 bytes per character toward its limit; IndexedDB is reported as the data's size.
+      return (store.get(KEY) || "").length * (backend === "idb" ? 1 : 2);
     } catch {
       return 0;
     }
@@ -402,10 +748,14 @@
     const el = byId("appBanner");
     if (!el) return;
     let html = "";
-    if (recoveryRaw)
+    if (storageBlocked)
+      html = `<div class="banner danger"><strong>Your saved data couldn't be opened right now.</strong><span>Nothing has been changed, and new changes won't be saved until it opens. Close Strength OS completely and open it again.</span><div class="wrap"><button class="btn primary small-btn" id="bannerReloadBtn" type="button">Try again</button></div></div>`;
+    else if (recoveryRaw)
       html = `<div class="banner danger"><strong>Your saved data couldn't be opened.</strong><span>Nothing has been changed or overwritten, and new changes won't be saved until this is fixed. Download the raw data so it can be repaired.</span><div class="wrap"><button class="btn primary small-btn" id="bannerRawBtn" type="button">Download raw data</button></div></div>`;
     else if (saveFailed)
       html = `<div class="banner danger"><strong>Changes aren't being saved.</strong><span>Browser storage is full or blocked. Export a backup now so nothing is lost.</span><div class="wrap"><button class="btn primary small-btn" id="bannerExportBtn" type="button">Export backup</button></div></div>`;
+    else if (dataMissing)
+      html = `<div class="banner info"><strong>No saved workouts were found on this device.</strong><span>If you have a backup, import it from More → Data health. Nothing is saved until you change something.</span><div class="wrap"><button class="btn primary small-btn" id="bannerDataHealthBtn" type="button">Go to Data health</button></div></div>`;
     else if (updateReady)
       html = `<div class="banner info"><strong>Strength OS has been updated.</strong><span>Reload to use the new version.</span><div class="wrap"><button class="btn primary small-btn" id="bannerReloadBtn" type="button">Reload</button></div></div>`;
     el.innerHTML = html;
@@ -415,6 +765,7 @@
     );
     byId("bannerExportBtn")?.addEventListener("click", exportBackup);
     byId("bannerReloadBtn")?.addEventListener("click", () => location.reload());
+    byId("bannerDataHealthBtn")?.addEventListener("click", () => navigate("more"));
   }
 
   // Per-exercise index of logged (complete/shortened) work. Rebuilt lazily after every save.
@@ -3489,7 +3840,8 @@
           : `<div class="health-ok">No structural data problems detected.</div>`
       }<div class="wrap" style="margin-top:12px"><button class="btn ghost" id="healthDetailsBtn" type="button">View integrity report</button><button class="btn ghost" id="exportBtn" type="button">Export backup</button><label class="btn ghost">Import backup<input class="hidden" id="importInput" type="file" accept="application/json,.json"></label></div>${hasUndoCopy() ? `<div class="note-box" style="margin-top:12px">An undo copy from your last import or reset is kept on this device.<div class="wrap" style="margin-top:8px"><button class="btn ghost small-btn" id="undoImportBtn" type="button">Restore previous data</button><button class="btn ghost small-btn" id="discardUndoBtn" type="button">Delete undo copy</button></div></div>` : ""}</section>
       <section class="card"><h2>Training configuration</h2><div class="settings-actions"><button class="btn ghost" id="editTargetsBtn" type="button">Muscle targets</button><button class="btn ghost" id="editBodyFieldsBtn" type="button">Body fields</button><button class="btn ghost" id="plateCalcBtn" type="button">Plate calculator</button><button class="btn ghost" id="warmupCalcBtn" type="button">Warm-up calculator</button></div></section>
-      ${localStorage.getItem(MIGRATION_BACKUP_KEY) ? `<section class="card"><h2>Legacy migration</h2><p class="meta">Original V1 data is retained separately as a migration safety copy.</p><button class="btn ghost" id="legacyBackupBtn" type="button">Download V1 migration backup</button></section>` : ""}
+      ${preUpgradeNote()}
+      ${store.get(MIGRATION_BACKUP_KEY) ? `<section class="card"><h2>Legacy migration</h2><p class="meta">Original V1 data is retained separately as a migration safety copy.</p><button class="btn ghost" id="legacyBackupBtn" type="button">Download V1 migration backup</button></section>` : ""}
       <section class="card"><div class="section-title"><div><p class="eyebrow">About</p><h2>Strength OS</h2></div><span class="pill neutral">v${APP_VERSION}</span></div><p class="meta">Local-first workout tracking · Data schema v${VERSION} · no account or cloud backend required.</p></section>
       <section class="card danger-zone"><h2>Advanced</h2><p class="meta">Reset removes Strength OS data stored in this browser. Export a backup first.</p><button class="btn danger" id="resetBtn" type="button">Reset Strength OS data</button></section>
     </div>`;
@@ -3537,23 +3889,28 @@
     byId("importInput").addEventListener("change", importBackup);
     byId("undoImportBtn")?.addEventListener("click", undoImport);
     byId("discardUndoBtn")?.addEventListener("click", () => {
+      if (dataLocked()) return;
       if (!confirm("Delete the undo copy? This frees storage but you won't be able to restore it.")) return;
       try {
-        localStorage.removeItem(PRE_IMPORT_KEY);
+        store.remove(PRE_IMPORT_KEY);
       } catch {}
       renderMore();
     });
+    byId("preUpgradeBtn")?.addEventListener("click", () =>
+      downloadText(`strength-os-pre-upgrade-copy.json`, preUpgradeCopy()?.text || "", "application/json"),
+    );
     byId("legacyBackupBtn")?.addEventListener("click", () =>
       downloadText(
         "strength-os-v1-migration-backup.json",
-        localStorage.getItem(MIGRATION_BACKUP_KEY),
+        store.get(MIGRATION_BACKUP_KEY),
         "application/json",
       ),
     );
     byId("resetBtn").addEventListener("click", () => {
+      if (dataLocked()) return;
       if (!confirm("Reset all Strength OS data on this device? Export a backup first.")) return;
       try {
-        localStorage.setItem(PRE_IMPORT_KEY, JSON.stringify(state));
+        store.set(PRE_IMPORT_KEY, JSON.stringify(state));
       } catch {
         if (!confirm("There isn't room to keep an undo copy. Reset anyway?")) return;
       }
@@ -3568,15 +3925,22 @@
 
   function hasUndoCopy() {
     try {
-      return !!localStorage.getItem(PRE_IMPORT_KEY);
+      return !!store.get(PRE_IMPORT_KEY);
     } catch {
       return false;
     }
   }
   function storageText() {
-    const kb = storageBytes() / 1024;
-    // Safari allows roughly 5 MB per site for this kind of storage.
-    return kb >= 1024 ? `${(kb / 1024).toFixed(1)} MB of ~5 MB` : `${Math.max(1, Math.round(kb))} KB of ~5 MB`;
+    const kb = storageBytes() / 1024,
+      size = kb >= 1024 ? `${(kb / 1024).toFixed(1)} MB` : `${Math.max(1, Math.round(kb))} KB`;
+    // localStorage (the fallback) allows roughly 5 MB per site; IndexedDB has no practical limit for this app.
+    return backend === "idb" ? size : `${size} of ~5 MB`;
+  }
+  function preUpgradeNote() {
+    const copy = preUpgradeCopy();
+    if (!copy) return "";
+    const until = copy.until.toLocaleDateString(undefined, { month: "short", day: "numeric" });
+    return `<section class="card"><h2>Storage upgrade</h2><p class="meta">Your data now lives in IndexedDB, which has room for years of workouts. A safety copy from before the move is kept on this device until ${esc(until)}, then removed automatically.</p><button class="btn ghost" id="preUpgradeBtn" type="button">Download safety copy</button></section>`;
   }
   async function exportBackup() {
     const name = `strength-os-backup-${isoToday()}.json`;
@@ -3884,6 +4248,7 @@
   function importBackup(e) {
     const file = e.target.files?.[0];
     if (!file) return;
+    if (dataLocked()) return void (e.target.value = "");
     const r = new FileReader();
     r.onload = () => {
       let parsed;
@@ -3911,7 +4276,7 @@
         return showToast("The backup couldn't be read. Nothing was changed.");
       }
       try {
-        localStorage.setItem(PRE_IMPORT_KEY, JSON.stringify(state));
+        store.set(PRE_IMPORT_KEY, JSON.stringify(state));
       } catch {
         if (!confirm("There isn't room to keep an undo copy of your current data. Import anyway? (Export a backup first if unsure.)"))
           return;
@@ -3929,16 +4294,17 @@
     e.target.value = "";
   }
   function undoImport() {
+    if (dataLocked()) return;
     let prev;
     try {
-      prev = JSON.parse(localStorage.getItem(PRE_IMPORT_KEY) || "null");
+      prev = JSON.parse(store.get(PRE_IMPORT_KEY) || "null");
     } catch {}
     if (!prev) return showToast("No undo copy found.");
     if (!confirm("Restore the data you had before the last import? The imported data will be replaced.")) return;
     state = normalizeState(migrateStateSchema(prev));
     if (!save()) return;
     try {
-      localStorage.removeItem(PRE_IMPORT_KEY);
+      store.remove(PRE_IMPORT_KEY);
     } catch {}
     applyPreferences();
     selectedProgramId = state.settings.activeProgramId;
@@ -3969,4 +4335,6 @@
       closeModal();
     });
   }
+  early();
+  boot(); // last, so every declaration above is ready
 })();

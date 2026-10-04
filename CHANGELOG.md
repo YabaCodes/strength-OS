@@ -1,3 +1,15 @@
+## v2.9.0 — Storage moved to IndexedDB
+
+- Your workouts are now saved in IndexedDB instead of localStorage. localStorage stops accepting changes at about 5 MB, which is roughly 3–4 years of logging; IndexedDB has room for many years. Tested with 7 years of history (about 8 MB), which v2.8.1 could not save.
+- Nothing to do: on first launch your data is copied over, checked byte for byte, and only then removed from localStorage. Everything looks and works the same, including a workout in progress, dark mode on launch, and the undo copy from your last import or reset.
+- A safety copy from before the move is kept on the device for 30 days (More → Storage upgrade → Download safety copy), then removed automatically.
+- Each change is handed to storage the moment you make it, so sets logged right before closing the app are kept.
+- More → Data health shows the size of your data without the old "of ~5 MB" limit.
+- If storage can't be opened at launch, a banner says so and nothing is saved (and import, reset and undo are turned off) until it opens again, instead of starting an empty profile on top of your data.
+- If saving keeps failing during a workout, the banner appears and an emergency copy is kept; the next launch puts it back, so sets logged in the meantime aren't lost.
+- An old copy of the app (an open desktop tab, or a rollback) can't replace your data with a blank profile; only a newer version of the same data is ever taken over.
+- The update banner and Install button can no longer be missed while the app is loading.
+
 ## v2.8.1 — Settings fixes
 
 - Settings in More (theme, layout density, units, week start, Train dashboard, logging options) now save and apply the moment you change them. Before, they only applied after tapping "Save personalization", which sat in a different card, so changing Theme or Density looked like it did nothing.

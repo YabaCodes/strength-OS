@@ -147,6 +147,15 @@ Strength OS detects the legacy format and migrates it during import.
 
 All training and body-measurement data stays in browser storage on the device. There is no cloud account or external database. Use regular JSON exports as backups, especially before clearing browser data or changing devices.
 
+Since v2.9.0 the data is saved in the browser's IndexedDB (database `strength-os`, store `kv`), which has no practical size limit for this app. Before that it was saved in localStorage, which stops accepting changes at about 5 MB (roughly 3–4 years of logging).
+
+- The app works on an in-memory copy and hands every change to IndexedDB immediately, so a set logged right before the app is closed is kept.
+- On the first launch of v2.9.0 the data, the import/reset undo copy and the V1 migration copy are copied from localStorage to IndexedDB, read back and compared, and only then removed from localStorage. A safety copy of the data from before the move is kept in IndexedDB for 30 days (downloadable under More → Storage upgrade) and is then removed automatically.
+- After the move, data found in localStorage is only taken if it is a newer version of the same profile (same `meta.createdAt`): changes saved by an older copy of the app that was still open, or the emergency copy written to localStorage when saving to IndexedDB keeps failing. A different or empty profile never replaces your data; whichever version isn't kept becomes the safety copy.
+- While saved data can't be opened, import, reset and undo are turned off.
+- localStorage keeps only small helpers: `strengthOSPrefs` (theme and density, so dark mode is applied before the first paint), `strengthOSStorage` (records that the data moved, and when), and `strengthOSRestTimer` (a running rest timer).
+- If a browser can't use IndexedDB at all, the app keeps using localStorage as before. If the data has already moved but IndexedDB can't be opened, the app shows a banner and saves nothing until it opens again, so an empty profile is never written over your data.
+
 ## Notes
 
 - The body heat map is intentionally a **schematic training visualization**, not a medical/anatomical illustration.

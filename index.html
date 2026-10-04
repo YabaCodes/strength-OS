@@ -9,7 +9,8 @@
     // Apply the saved theme before anything is drawn, so dark mode doesn't flash white on launch.
     (function () {
       try {
-        var s = JSON.parse(localStorage.getItem("strengthOSV2") || "{}").settings || {};
+        // Data lives in IndexedDB since v2.9.0; theme and density are mirrored here so they can be read instantly.
+        var s = JSON.parse(localStorage.getItem("strengthOSPrefs") || "null") || JSON.parse(localStorage.getItem("strengthOSV2") || "{}").settings || {};
         var pref = s.theme || "system";
         var dark = pref === "dark" || (pref === "system" && window.matchMedia && matchMedia("(prefers-color-scheme: dark)").matches);
         document.documentElement.dataset.theme = dark ? "dark" : "light";
