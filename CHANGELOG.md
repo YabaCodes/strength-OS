@@ -1,3 +1,10 @@
+## v2.4.0 — History + Exercise Analytics
+- Made calendar days interactive with selected-day filtering.
+- Added monthly history summary metrics for workouts, working sets, and training time.
+- Replaced modal-only workout history with a dedicated workout-record detail screen.
+- Added previous/next workout navigation, full set-level history, PR display, and direct links from historical exercises to analytics.
+- Expanded exercise analytics with current vs best e1RM, best set, session count, 30D/90D/1Y/All ranges, top-load, total-reps, session-volume, PR timeline, and richer clickable exercise history.
+
 ## v2.3.0
 - Reworked the live workout logger for faster in-gym use.
 - Programmed exercises now pre-fill load/reps from the corresponding previous session while remaining incomplete until confirmed.
