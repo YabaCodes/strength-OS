@@ -1,3 +1,10 @@
+## v2.8.1 — Settings fixes
+
+- Settings in More (theme, layout density, units, week start, Train dashboard, logging options) now save and apply the moment you change them. Before, they only applied after tapping "Save personalization", which sat in a different card, so changing Theme or Density looked like it did nothing.
+- Compact density is now clearly tighter: about 15% shorter on Train, History and Progress, and about 10% on the live workout and More, while keeping 16px inputs and 44px Done buttons.
+- Pausing a workout started from the workout preview now returns to Train with the Resume card (it used to land on the preview page, hiding the paused workout).
+- The set buttons under each exercise no longer cut off their labels ("Use previous" is now "Previous").
+
 ## v2.8.0 — Reliability, in-gym logging, dark mode fixes
 
 Data safety

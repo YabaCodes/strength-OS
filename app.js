@@ -5,7 +5,7 @@
   const LEGACY_KEY = "strengthProteinTrackerV1";
   const MIGRATION_BACKUP_KEY = "strengthOSMigrationBackupV1";
   const VERSION = 3;
-  const APP_VERSION = "2.8.0"; // Bump together with VERSION in sw.js.
+  const APP_VERSION = "2.8.1"; // Bump together with VERSION in sw.js.
   const trackingTypes = [
     ["weight_reps", "Weight + reps"],
     ["bodyweight_reps", "Bodyweight + reps"],
@@ -709,6 +709,9 @@
   function resetLiveUi() {
     expandedItems = new Set();
     lastTouchedItemId = null;
+    // Leaving or starting a workout always returns to the Train home, not an old preview page.
+    trainPreviewProgramId = null;
+    trainPreviewDayId = null;
   }
   function openHistoryRecord(sessionId) {
     selectedHistorySessionId = sessionId;
@@ -939,6 +942,7 @@
       .forEach((b) => b.addEventListener("click", () => finishSession(s, b.dataset.finish)));
     byId("closeWorkoutBtn").addEventListener("click", () => {
       state.currentWorkoutId = null;
+      resetLiveUi();
       save();
       stopElapsedTimer();
       releaseWakeLock();
@@ -1029,7 +1033,7 @@
       <div class="previous"><div><strong>Previous:</strong> ${previousText(prev, ex)}</div><div><strong>Suggested:</strong> ${esc(suggestion)}</div></div>
       <div class="set-head" aria-hidden="true"><span>Set</span><span>Type</span><span>${loadHeader(ex)}</span><span>${repHeader(ex)}</span><span>${state.settings.trackRir ? "RIR" : ""}</span><span>Done</span></div>
       <div id="sets_${item.id}">${sets.map((st, i) => liveSetRow(session, item, ex, st, i, prev)).join("")}</div>
-      <div class="exercise-actions"><button class="btn ghost small-btn use-prev" data-item="${item.id}" type="button">Use previous</button><button class="btn ghost small-btn add-set" data-item="${item.id}" type="button">+ Set</button><button class="btn ghost small-btn add-warmup" data-item="${item.id}" type="button">+ Warm-up</button><button class="btn ghost small-btn remove-last-set" data-item="${item.id}" type="button">− Set</button><button class="btn ghost small-btn rest-now" data-item="${item.id}" type="button">Rest</button></div>
+      <div class="exercise-actions"><button class="btn ghost small-btn use-prev" data-item="${item.id}" type="button" aria-label="Use previous values">Previous</button><button class="btn ghost small-btn add-set" data-item="${item.id}" type="button">+ Set</button><button class="btn ghost small-btn add-warmup" data-item="${item.id}" type="button">+ Warm-up</button><button class="btn ghost small-btn remove-last-set" data-item="${item.id}" type="button">− Set</button><button class="btn ghost small-btn rest-now" data-item="${item.id}" type="button">Rest</button></div>
       <div class="exercise-flags"><label class="check-chip compact-chip"><input class="tech-good" data-item="${item.id}" type="checkbox" ${item.techniqueGood !== false ? "checked" : ""}><span>Technique good</span></label><label class="pain-inline"><span>Pain</span><select class="pain-select" data-item="${item.id}" aria-label="Pain or discomfort"><option value="none" ${item.pain === "none" ? "selected" : ""}>None</option><option value="mild" ${item.pain === "mild" ? "selected" : ""}>Mild</option><option value="stop" ${item.pain === "stop" ? "selected" : ""}>Stop exercise</option></select></label></div>
       ${item.notes ? `<div class="note-box"><strong>Session note:</strong> ${esc(item.notes)}</div>` : ""}
     </div></section>`;
@@ -3475,7 +3479,7 @@
     view.innerHTML = `<div class="stack">
       <section class="card"><div class="section-title"><div><p class="eyebrow">Library</p><h2>Exercise Library</h2></div><button class="btn primary small-btn" id="moreAddExercise" type="button">+ Exercise</button></div><p class="meta">Create, edit, archive, and map exercises to muscles.</p><button class="btn ghost" id="moreOpenLibrary" type="button">Open library</button></section>
       <section class="card"><div class="section-title"><div><p class="eyebrow">Personalization</p><h2>Appearance & display</h2></div><span class="pill neutral">v${APP_VERSION}</span></div><div class="form-grid" style="margin-top:12px"><label>Theme<select id="themeSetting"><option value="system" ${state.settings.theme === "system" ? "selected" : ""}>System</option><option value="light" ${state.settings.theme === "light" ? "selected" : ""}>Light</option><option value="dark" ${state.settings.theme === "dark" ? "selected" : ""}>Dark</option></select></label><label>Layout density<select id="densitySetting"><option value="comfortable" ${state.settings.density !== "compact" ? "selected" : ""}>Comfortable</option><option value="compact" ${state.settings.density === "compact" ? "selected" : ""}>Compact</option></select></label><label>Units<select id="unitsSetting"><option value="kg" ${state.settings.units === "kg" ? "selected" : ""}>kg</option><option value="lb" ${state.settings.units === "lb" ? "selected" : ""}>lb</option></select></label><label>Week starts<select id="weekSetting"><option value="monday" ${state.settings.weekStarts === "monday" ? "selected" : ""}>Monday</option><option value="sunday" ${state.settings.weekStarts === "sunday" ? "selected" : ""}>Sunday</option></select></label></div><div class="pref-group"><span class="pref-label">Train dashboard</span><div class="checks"><label class="check-chip"><input id="weekProgressSetting" type="checkbox" ${state.settings.showWeeklyProgress !== false ? "checked" : ""}><span>Weekly progress</span></label><label class="check-chip"><input class="train-metric-setting" type="checkbox" value="weight" ${trainMetrics.includes("weight") ? "checked" : ""}><span>Body weight</span></label><label class="check-chip"><input class="train-metric-setting" type="checkbox" value="waist" ${trainMetrics.includes("waist") ? "checked" : ""}><span>Waist</span></label></div></div></section>
-      <section class="card"><div><p class="eyebrow">Training defaults</p><h2>Logging behavior</h2></div><div class="form-grid" style="margin-top:12px"><label>New exercise rest (sec)<input id="defaultRestSetting" type="number" min="15" max="900" step="15" value="${Number.isFinite(Number(state.settings.defaultExerciseRest)) ? Number(state.settings.defaultExerciseRest) : 90}"></label><label>Secondary muscle credit<select id="secondaryMultiplierSetting"><option value="0.25" ${Number(state.settings.secondaryMultiplier) === 0.25 ? "selected" : ""}>25%</option><option value="0.5" ${Number(state.settings.secondaryMultiplier) === 0.5 ? "selected" : ""}>50%</option><option value="0.75" ${Number(state.settings.secondaryMultiplier) === 0.75 ? "selected" : ""}>75%</option></select></label></div><div class="checks" style="margin-top:10px"><label class="check-chip"><input id="rirSetting" type="checkbox" ${state.settings.trackRir ? "checked" : ""}><span>Track RIR</span></label><label class="check-chip"><input id="restSetting" type="checkbox" ${state.settings.autoRest ? "checked" : ""}><span>Auto rest timer</span></label><label class="check-chip"><input id="restSoundSetting" type="checkbox" ${state.settings.restSound !== false ? "checked" : ""}><span>Rest timer sound</span></label><label class="check-chip"><input id="keepAwakeSetting" type="checkbox" ${state.settings.keepAwake !== false ? "checked" : ""}><span>Keep screen on during workouts</span></label></div><button class="btn primary" id="savePrefsBtn" type="button" style="margin-top:12px">Save personalization</button></section>
+      <section class="card"><div><p class="eyebrow">Training defaults</p><h2>Logging behavior</h2></div><div class="form-grid" style="margin-top:12px"><label>New exercise rest (sec)<input id="defaultRestSetting" type="number" min="15" max="900" step="15" value="${Number.isFinite(Number(state.settings.defaultExerciseRest)) ? Number(state.settings.defaultExerciseRest) : 90}"></label><label>Secondary muscle credit<select id="secondaryMultiplierSetting"><option value="0.25" ${Number(state.settings.secondaryMultiplier) === 0.25 ? "selected" : ""}>25%</option><option value="0.5" ${Number(state.settings.secondaryMultiplier) === 0.5 ? "selected" : ""}>50%</option><option value="0.75" ${Number(state.settings.secondaryMultiplier) === 0.75 ? "selected" : ""}>75%</option></select></label></div><div class="checks" style="margin-top:10px"><label class="check-chip"><input id="rirSetting" type="checkbox" ${state.settings.trackRir ? "checked" : ""}><span>Track RIR</span></label><label class="check-chip"><input id="restSetting" type="checkbox" ${state.settings.autoRest ? "checked" : ""}><span>Auto rest timer</span></label><label class="check-chip"><input id="restSoundSetting" type="checkbox" ${state.settings.restSound !== false ? "checked" : ""}><span>Rest timer sound</span></label><label class="check-chip"><input id="keepAwakeSetting" type="checkbox" ${state.settings.keepAwake !== false ? "checked" : ""}><span>Keep screen on during workouts</span></label></div><p class="meta" style="margin-top:10px">Changes save automatically.</p></section>
       <section class="card"><div class="section-title"><div><p class="eyebrow">Data health</p><h2>Integrity & backups</h2></div><span class="pill ${issues.length ? "warn" : "good"}">${issues.length ? `${issues.length} issue${issues.length > 1 ? "s" : ""}` : "Healthy"}</span></div><div class="data-health-grid"><div class="health-stat"><span>Schema</span><strong>v${VERSION}</strong></div><div class="health-stat"><span>Sessions</span><strong>${state.sessions.length}</strong></div><div class="health-stat"><span>Exercises</span><strong>${Object.keys(state.exercises).length}</strong></div><div class="health-stat"><span>Last backup</span><strong class="health-backup-value">${esc(lastBackup)}</strong></div><div class="health-stat"><span>Storage used</span><strong>${storageText()}</strong></div></div>${
         issues.length
           ? `<div class="stack health-preview">${issues
@@ -3493,7 +3497,8 @@
     byId("moreOpenLibrary").addEventListener("click", openLibraryModal);
     byId("plateCalcBtn").addEventListener("click", openPlateCalculator);
     byId("warmupCalcBtn").addEventListener("click", openWarmupCalculator);
-    byId("savePrefsBtn").addEventListener("click", () => {
+    // Every setting saves and applies the moment it changes (no Save button to hunt for).
+    const saveSettings = () => {
       state.settings.theme = byId("themeSetting").value;
       state.settings.density = byId("densitySetting").value;
       state.settings.units = byId("unitsSetting").value;
@@ -3509,9 +3514,22 @@
       state.settings.trainMetrics = [...document.querySelectorAll(".train-metric-setting:checked")].map((x) => x.value);
       save();
       applyPreferences();
-      renderMore();
-      showToast("Personalization saved.");
-    });
+      showToast("Saved.");
+    };
+    [
+      "#themeSetting",
+      "#densitySetting",
+      "#unitsSetting",
+      "#weekSetting",
+      "#rirSetting",
+      "#restSetting",
+      "#restSoundSetting",
+      "#keepAwakeSetting",
+      "#defaultRestSetting",
+      "#secondaryMultiplierSetting",
+      "#weekProgressSetting",
+      ".train-metric-setting",
+    ].forEach((q) => document.querySelectorAll(q).forEach((el) => el.addEventListener("change", saveSettings)));
     byId("editTargetsBtn").addEventListener("click", openMuscleTargetsModal);
     byId("editBodyFieldsBtn").addEventListener("click", openBodyFieldsModal);
     byId("healthDetailsBtn").addEventListener("click", openDataHealthReport);

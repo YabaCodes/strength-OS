@@ -1,5 +1,5 @@
 // Bump this together with APP_VERSION in app.js on every release.
-const VERSION = "2.8.0";
+const VERSION = "2.8.1";
 const CACHE = `strength-os-v${VERSION}`;
 const ASSETS = [
   "./",

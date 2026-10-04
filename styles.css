@@ -2257,3 +2257,166 @@ html[data-theme="dark"] .pill.superset-pill {
 .set-prev-line span:first-child {
   min-width: 0;
 }
+
+/* ---------- Compact density (v2.8.1): noticeably tighter, same tap targets ---------- */
+html[data-density="compact"] .topbar {
+  min-height: 0;
+  padding: calc(8px + env(safe-area-inset-top)) 14px 8px;
+}
+html[data-density="compact"] .brand-logo {
+  width: 34px;
+  height: 34px;
+  border-radius: 10px;
+}
+html[data-density="compact"] .brand-title-row h1 {
+  font-size: 19px;
+}
+html[data-density="compact"] .content {
+  padding: 10px 12px;
+}
+html[data-density="compact"] .stack {
+  gap: 8px;
+}
+html[data-density="compact"] .grid-2,
+html[data-density="compact"] .grid-3 {
+  gap: 8px;
+}
+html[data-density="compact"] .card,
+html[data-density="compact"] .hero,
+html[data-density="compact"] .today-card,
+html[data-density="compact"] .library-card,
+html[data-density="compact"] .preview-summary,
+html[data-density="compact"] .workout-head {
+  padding: 11px 12px;
+  border-radius: 14px;
+}
+html[data-density="compact"] .exercise-card,
+html[data-density="compact"] .exercise-card.collapsed {
+  padding: 0;
+}
+html[data-density="compact"] .card h2 {
+  font-size: 17px;
+}
+html[data-density="compact"] .train-hero h2 {
+  font-size: 19px;
+}
+html[data-density="compact"] .metric {
+  min-height: 0;
+  padding: 9px 10px;
+}
+html[data-density="compact"] .metric strong,
+html[data-density="compact"] .history-month-metrics .metric strong {
+  font-size: 19px;
+}
+html[data-density="compact"] .list-row,
+html[data-density="compact"] .exercise-preview-row {
+  padding: 8px 0;
+}
+html[data-density="compact"] .program-day-head {
+  padding: 9px 10px;
+}
+html[data-density="compact"] .program-item {
+  padding: 7px 0;
+}
+html[data-density="compact"] .btn {
+  padding: 7px 11px;
+}
+html[data-density="compact"] .preview-actions,
+html[data-density="compact"] .wrap {
+  gap: 7px;
+}
+html[data-density="compact"] .cal-day {
+  min-height: 36px;
+  padding: 4px 5px;
+}
+html[data-density="compact"] .exercise-top {
+  padding: 10px 12px;
+}
+html[data-density="compact"] .exercise-body {
+  padding: 9px 12px 11px;
+  gap: 8px;
+}
+html[data-density="compact"] .previous,
+html[data-density="compact"] .note-box,
+html[data-density="compact"] .insight {
+  padding: 7px 9px;
+}
+html[data-density="compact"] .set-entry {
+  padding: 2px 0 3px;
+}
+html[data-density="compact"] .set-row input,
+html[data-density="compact"] .set-row select {
+  min-height: 40px;
+}
+html[data-density="compact"] .muscle-row {
+  padding: 6px 0;
+}
+html[data-density="compact"] .health-stat {
+  padding: 8px 9px;
+}
+html[data-density="compact"] .check-chip span {
+  min-height: 34px;
+  padding: 6px 9px;
+}
+html[data-density="compact"] .body-map.anatomy-map {
+  max-height: 280px;
+}
+html[data-density="compact"] .nav-btn {
+  min-height: 50px;
+}
+html[data-density="compact"] #app {
+  padding-bottom: calc(76px + env(safe-area-inset-bottom));
+}
+html[data-density="compact"] .form-grid {
+  gap: 7px;
+}
+html[data-density="compact"] label {
+  gap: 4px;
+}
+html[data-density="compact"] input,
+html[data-density="compact"] select {
+  min-height: 40px;
+  padding-top: 7px;
+  padding-bottom: 7px;
+}
+html[data-density="compact"] .pref-group {
+  margin-top: 10px;
+}
+html[data-density="compact"] .checks {
+  gap: 6px;
+}
+html[data-density="compact"] .data-health-grid,
+html[data-density="compact"] .settings-actions {
+  gap: 6px;
+  margin-top: 9px;
+}
+html[data-density="compact"] .card p.meta {
+  margin-top: 3px;
+  margin-bottom: 6px;
+}
+html[data-density="compact"] .program-item .btn.small-btn,
+html[data-density="compact"] .program-day-head .btn.small-btn {
+  min-height: 34px;
+  padding: 5px 9px;
+}
+html[data-density="compact"] .program-day-head .wrap,
+html[data-density="compact"] .program-item .wrap {
+  margin-top: 4px;
+}
+html[data-density="compact"] .exercise-actions .btn.small-btn {
+  min-height: 36px;
+}
+html[data-density="compact"] .set-prev-line {
+  padding-bottom: 1px;
+}
+html[data-density="compact"] .exercise-flags .check-chip span,
+html[data-density="compact"] .pain-inline select {
+  min-height: 34px;
+}
+/* Set action buttons size to their labels so none get cut off */
+.exercise-actions {
+  grid-template-columns: repeat(5, auto);
+}
+.exercise-actions .use-prev {
+  font-size: 12px;
+}
