@@ -1,3 +1,10 @@
+## v2.6.0
+- Expanded deterministic Insights with 4-week vs previous-4-week adherence, sustained muscle-volume patterns, repeated shortened-session patterns, and richer plateau context.
+- Added a Training Pulse summary for adherence, session frequency, duration, and weekly working-set load.
+- Upgraded Goals with deadlines, baseline-aware progress, achieved/due states, goal summaries, and clearer remaining-to-target feedback.
+- Added goal types for 4-week workout adherence and 4-week average effective muscle sets.
+- Preserved existing goals and local training data; new goal fields are optional and backward-compatible.
+
 ## v2.5.0
 - Added a visible app version badge in the Strength OS header and an About card under More.
 - Standardized typography across headings, metadata, buttons, pills, lists, metrics, forms, and notes.
