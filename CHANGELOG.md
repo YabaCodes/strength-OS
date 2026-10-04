@@ -1,3 +1,13 @@
+## v2.7.0
+- Added Light / Dark / System themes and Comfortable / Compact layout density.
+- Added Train dashboard visibility controls for weekly progress, body weight, and waist.
+- Added a configurable default rest value for newly created exercises and exposed secondary-muscle set credit (25/50/75%).
+- Rebuilt the muscle heat map as a cleaner training-focused anatomical front/back diagram with individually interactive muscle regions and keyboard access.
+- Upgraded Data Health with schema v3 migration tracking, expanded integrity checks, a dedicated integrity report, backup timestamping, and safer import migration.
+- Added additional checks for orphaned workouts, invalid dates/values, archived exercises in active programs, invalid prescriptions, body-entry duplication, goal IDs, and target ranges.
+- Added system-wide UI consistency refinements and dark-theme coverage across cards, forms, navigation, history, analytics, workout entry, and settings.
+- Bumped the service-worker cache to v2.7.0.
+
 ## v2.6.0
 - Expanded deterministic Insights with 4-week vs previous-4-week adherence, sustained muscle-volume patterns, repeated shortened-session patterns, and richer plateau context.
 - Added a Training Pulse summary for adherence, session frequency, duration, and weekly working-set load.
