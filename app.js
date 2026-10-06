@@ -14,7 +14,7 @@
     DB_STORE = "kv";
   const PRE_UPGRADE_DAYS = 30;
   const VERSION = 3;
-  const APP_VERSION = "2.10.0"; // Bump together with VERSION in sw.js.
+  const APP_VERSION = "2.11.0"; // Bump together with VERSION in sw.js.
   const trackingTypes = [
     ["weight_reps", "Weight + reps"],
     ["bodyweight_reps", "Bodyweight + reps"],
@@ -529,7 +529,7 @@
       meta: { createdAt: Date.now(), updatedAt: Date.now(), migratedFrom: null },
       settings: {
         units: "kg",
-        weekStarts: "monday",
+        weekStarts: "sunday",
         trackRir: true,
         autoRest: true,
         secondaryMultiplier: 0.5,
@@ -583,6 +583,7 @@
       }
     }
     const s = newState();
+    s.meta.programRevision = SEED.programRevision?.id;
     try {
       if (!dataMissing) store.set(KEY, JSON.stringify(s));
     } catch {}
@@ -667,6 +668,7 @@
 
   function migrateLegacy(old) {
     const s = newState();
+    s.meta.programRevision = SEED.programRevision?.id;
     s.meta.migratedFrom = "strengthProteinTrackerV1";
     s.meta.migratedAt = Date.now();
     Object.entries(old.body || {}).forEach(([date, v]) => {
@@ -1033,12 +1035,13 @@
     view.innerHTML = `<div class="stack">
       <section class="card hero train-hero"><div class="row start"><div><p class="meta">Active program</p><h2>${nameHTML(p?.name || "No active program")}</h2><p class="meta">${d ? `Today · ${esc(d.name)}${doneToday ? ` · ${doneToday.status === "skipped" ? "skipped" : "done"}` : ""}` : "No scheduled session today"}</p></div>${showWeek ? `<span class="pill train-summary-badge">${week.done}/${week.scheduled} this week</span>` : ""}</div></section>
       ${unfinished.map((u) => `<section class="card unfinished-card"><div class="row start"><div><p class="eyebrow">Unfinished workout</p><h2>${nameHTML(u.name)}</h2><p class="meta">${fmtDate(u.date)} · ${u.items.reduce((n, i) => n + workingSets(i).length, 0)} sets logged</p></div><span class="pill warn">Paused</span></div><div class="preview-actions" style="margin-top:12px"><button class="btn primary resume-session" data-session="${u.id}" type="button">Resume</button><button class="btn ghost discard-session" data-session="${u.id}" type="button">Discard</button></div></section>`).join("")}
+      ${revisionCardHTML("train")}
       ${backupReminderHTML()}
       ${
         d && doneToday
           ? `<section class="card today-card done-today"><div class="section-title"><h2>${nameHTML(d.name)}</h2><span class="pill ${doneToday.status === "complete" ? "good" : doneToday.status === "shortened" ? "warn" : "neutral"}">${doneToday.status === "skipped" ? "Skipped today" : `Done · ${cap(doneToday.status)}`}</span></div><p class="meta" style="margin-top:6px">${doneToday.status === "skipped" ? "Marked as skipped. You can still train if plans change." : `${doneToday.items.reduce((n, i) => n + workingSets(i).length, 0)} working sets${sessionDuration(doneToday) ? ` · ${durationText(sessionDuration(doneToday))}` : ""}. Nice work.`}</p><div class="preview-actions" style="margin-top:12px">${doneToday.status === "skipped" ? `<button class="btn primary" id="viewTodayBtn" type="button">View workout</button>` : `<button class="btn primary" id="viewTodayRecordBtn" data-session="${doneToday.id}" type="button">View record</button><button class="btn ghost" id="viewTodayBtn" type="button">Train again</button>`}</div></section>`
           : d
-          ? `<section class="card today-card"><div class="section-title"><h2>${nameHTML(d.name)}</h2><span class="meta">${d.items.length} exercises · ${d.items.reduce((a, x) => a + x.sets, 0)} sets</span></div><div class="list" style="margin-top:7px">${d.items
+          ? `<section class="card today-card"><div class="section-title"><h2>${nameHTML(d.name)}</h2><span class="meta">${d.items.length} exercises · ${d.items.reduce((a, x) => a + x.sets, 0)} sets</span></div>${restNote(d) ? `<p class="meta rest-warn" style="margin-top:4px">${esc(restNote(d))}</p>` : ""}<div class="list" style="margin-top:7px">${d.items
               .slice(0, 4)
               .map(
                 (x) =>
@@ -1047,8 +1050,11 @@
               .join(
                 "",
               )}${d.items.length > 4 ? `<div class="meta">+ ${d.items.length - 4} more exercises</div>` : ""}</div><div class="preview-actions" style="margin-top:12px"><button class="btn primary" id="viewTodayBtn" type="button">View workout</button><button class="btn ghost" id="skipTodayBtn" type="button">Mark skipped</button></div></section>`
-          : `<section class="card"><h2>Recovery / flexible day</h2><p class="muted">Start an empty workout or choose any program day if you want to train.</p></section>`
+          : missedThisWeek(p).length
+            ? ""
+            : `<section class="card"><h2>Recovery / flexible day</h2><p class="muted">Start an empty workout or choose any program day if you want to train.</p></section>`
       }
+      ${catchUpHTML(p)}
       ${trainMetricCards ? `<section class="grid-2 train-metrics">${trainMetricCards}</section>` : ""}
       <section class="card library-card"><div class="section-title"><h2>Workout library</h2><button class="btn ghost small-btn" id="emptyWorkoutBtn" type="button">Empty workout</button></div><div class="list">${p?.days.map((day) => `<div class="list-row click-row preview-program-day workout-library-row" data-day="${day.id}"><div><strong>${esc(day.name)}</strong><div class="meta">${weekdayName(day.weekday)} · ${day.items.length} exercises</div></div><span class="row-chevron">›</span></div>`).join("") || `<p class="empty">Create a program first.</p>`}</div></section>
     </div>`;
@@ -1067,6 +1073,7 @@
       }),
     );
     wireBackupReminder();
+    wireRevisionCard(renderTrain);
     document
       .querySelectorAll(".preview-program-day")
       .forEach((r) => r.addEventListener("click", () => openTrainPreview(p.id, r.dataset.day)));
@@ -2056,7 +2063,7 @@
     if (p) selectedProgramId = p.id;
     const activeExercises = Object.values(state.exercises).filter((e) => !e.archived),
       customCount = activeExercises.filter((e) => !e.builtIn).length;
-    view.innerHTML = `<div class="stack"><section class="card"><div class="row"><div><p class="eyebrow">Program builder</p><h2>${p ? nameHTML(p.name) : "No program"}</h2><p class="meta">${p?.description ? esc(p.description) : "Create and edit reusable workout schedules."}</p></div><button class="btn primary" id="newProgramBtn" type="button">+ Program</button></div><div class="tabs" style="margin-top:12px">${Object.values(
+    view.innerHTML = `<div class="stack">${revisionCardHTML("programs")}<section class="card"><div class="row"><div><p class="eyebrow">Program builder</p><h2>${p ? nameHTML(p.name) : "No program"}</h2><p class="meta">${p?.description ? esc(p.description) : "Create and edit reusable workout schedules."}</p></div><button class="btn primary" id="newProgramBtn" type="button">+ Program</button></div><div class="tabs" style="margin-top:12px">${Object.values(
       state.programs,
     )
       .map(
@@ -2075,6 +2082,7 @@
       }),
     );
     byId("newProgramBtn").addEventListener("click", () => openProgramDetailsModal(null));
+    wireRevisionCard(renderPrograms);
     if (!p) return;
     byId("activateProgramBtn").addEventListener("click", () => {
       state.settings.activeProgramId = p.id;
@@ -2890,6 +2898,113 @@
       sets: ss.reduce((n, s) => n + s.items.reduce((a, i) => a + workingSets(i).length, 0), 0),
     };
   }
+  // ---------- weekly order (v2.11) ----------
+  // Muscles worked yesterday or today (logged sets), to warn before training them again within ~48 hours.
+  function recentlyWorkedMuscles() {
+    const since = addDays(isoToday(), -1),
+      out = new Set();
+    state.sessions
+      .filter((x) => x.date >= since && ["complete", "shortened", "in_progress"].includes(x.status))
+      .forEach((x) =>
+        x.items.forEach((i) => {
+          const m = (getExercise(i.exerciseId) || i.exerciseSnapshot)?.primaryMuscle;
+          if (m && workingSets(i).length) out.add(m);
+        }),
+      );
+    return out;
+  }
+  function restNote(day) {
+    const recent = recentlyWorkedMuscles();
+    const hit = [...new Set(day.items.map((i) => getExercise(i.exerciseId)?.primaryMuscle).filter((m) => m && recent.has(m)))];
+    return hit.length ? `Worked in the last 2 days: ${hit.map(muscleName).join(", ")}` : "";
+  }
+  // Scheduled days earlier this week that have no workout yet (done, shortened or skipped all count).
+  function missedThisWeek(p) {
+    if (!p) return [];
+    const today = isoToday(),
+      start = startOfWeek(today),
+      startDow = dateObj(start).getDay(),
+      todayPos = (dateObj(today).getDay() - startDow + 7) % 7;
+    return p.days
+      .filter((d) => Number(d.weekday) >= 0)
+      .map((d) => ({ day: d, pos: (Number(d.weekday) - startDow + 7) % 7 }))
+      .filter(({ day, pos }) => pos < todayPos && !state.sessions.some((x) => x.programDayId === day.id && x.date >= start && x.date <= today && ["complete", "shortened", "skipped", "in_progress"].includes(x.status)))
+      .sort((a, b) => a.pos - b.pos)
+      .map(({ day, pos }) => ({ day, date: addDays(start, pos) }));
+  }
+  function catchUpHTML(p) {
+    const missed = missedThisWeek(p);
+    if (!missed.length) return "";
+    return `<section class="card catch-up-card"><div class="section-title"><h2>Still to do this week</h2><span class="meta">${missed.length} session${missed.length > 1 ? "s" : ""}</span></div><div class="list" style="margin-top:6px">${missed
+      .map(({ day, date }) => {
+        const note = restNote(day);
+        return `<div class="list-row click-row preview-program-day" data-day="${day.id}"><div><strong>${esc(day.name)}</strong><div class="meta">Planned ${weekdayName(dateObj(date).getDay())} · ${day.items.length} exercises</div>${note ? `<div class="meta rest-warn">${esc(note)}</div>` : `<div class="meta rest-ok">Muscles rested</div>`}</div><span class="row-chevron">›</span></div>`;
+      })
+      .join("")}</div></section>`;
+  }
+
+  // ---------- program revision (offered once, applied only on request) ----------
+  function revisionPending() {
+    const r = SEED.programRevision;
+    return !!r && state.meta.programRevision !== r.id && Object.keys(state.programs || {}).length > 0;
+  }
+  function revisionCardHTML(where) {
+    const r = SEED.programRevision;
+    if (!revisionPending() || (where === "train" && state.meta.programRevisionDismissed === r.id)) return "";
+    return `<section class="card revision-card"><p class="eyebrow">Program update</p><h2>${esc(r.title)}</h2><p class="meta">${esc(r.summary)}</p><ul class="revision-list">${r.changes.map((c) => `<li>${esc(c)}</li>`).join("")}</ul><div class="preview-actions" style="margin-top:12px"><button class="btn primary" id="applyRevisionBtn" type="button">Apply to my program</button>${where === "train" ? `<button class="btn ghost" id="dismissRevisionBtn" type="button">Not now</button>` : ""}</div><p class="meta" style="margin-top:8px">Your current program is kept as a copy in Programs, and your history doesn't change.</p></section>`;
+  }
+  function wireRevisionCard(rerender) {
+    byId("applyRevisionBtn")?.addEventListener("click", () => {
+      applyProgramRevision();
+      rerender();
+      showToast("Revised program applied. Your previous one is saved in Programs.");
+    });
+    byId("dismissRevisionBtn")?.addEventListener("click", () => {
+      state.meta.programRevisionDismissed = SEED.programRevision.id;
+      save();
+      rerender();
+      showToast("You can apply it later from Programs.");
+    });
+  }
+  function applyProgramRevision() {
+    const r = SEED.programRevision,
+      rev = clone(SEED.program),
+      cur = activeProgram(),
+      stamp = Date.now();
+    const days = rev.days.map((d) => ({ ...d, items: d.items.map((i) => ({ ...i, id: uid("pi") })) }));
+    // Keep what was there as a separate, inactive program.
+    if (cur) {
+      const copy = clone(cur);
+      copy.id = uid("prog");
+      copy.name = `${cur.name} (before ${r.label})`;
+      copy.createdAt = stamp;
+      copy.updatedAt = stamp;
+      state.programs[copy.id] = copy;
+    }
+    // The built-in program is updated in place (same day IDs, so this week's workouts still count);
+    // any other active program is left alone and the revised one is added next to it.
+    if (cur && cur.id === rev.id) Object.assign(cur, { name: rev.name, description: rev.description, days, updatedAt: stamp });
+    else {
+      const id = state.programs[rev.id] ? uid("prog") : rev.id;
+      state.programs[id] = { ...rev, id, days, createdAt: stamp, updatedAt: stamp };
+      state.settings.activeProgramId = id;
+    }
+    // Technique cues on the existing exercises the revision leans on, only where there's no note yet.
+    const cues = {
+      lateral_raise: "Cable or dumbbell; keep tension at the bottom of the rep.",
+      standing_calf: "Pause 1–2 s in the bottom stretch.",
+      oh_tri: "Overhead position: more long-head growth than pressdowns.",
+    };
+    Object.entries(cues).forEach(([id, note]) => {
+      const ex = state.exercises[id];
+      if (ex && !ex.notes) ex.notes = note;
+    });
+    state.settings.weekStarts = "sunday";
+    state.meta.programRevision = r.id;
+    selectedProgramId = state.settings.activeProgramId;
+    save();
+  }
+
   function recentPRs(days) {
     const cutoff = addDays(isoToday(), -(days - 1)),
       out = [];
@@ -3205,7 +3320,8 @@
     <path class="muscle muscle-shape" role="button" tabindex="0" aria-label="Forearms" data-muscle="forearms" d="M50 143 Q44 154 41 178 Q41 187 46 188 L55 180 L61 147 Z" style="fill:${c("forearms")}"/><path class="muscle muscle-shape" role="button" tabindex="0" aria-label="Forearms" data-muscle="forearms" d="M170 143 Q176 154 179 178 Q179 187 174 188 L165 180 L159 147 Z" style="fill:${c("forearms")}"/>
     <path class="muscle muscle-shape" role="button" tabindex="0" aria-label="Abs" data-muscle="abs" d="M98 104 Q110 100 122 104 L121 154 Q110 160 99 154 Z" style="fill:${c("abs")}"/><path class="muscle-detail-line" d="M110 105V157M99 122H121M99 139H121"/>
     <path class="muscle muscle-shape" role="button" tabindex="0" aria-label="Obliques" data-muscle="obliques" d="M83 101 L98 106 L99 155 L89 173 L82 150 Z" style="fill:${c("obliques")}"/><path class="muscle muscle-shape" role="button" tabindex="0" aria-label="Obliques" data-muscle="obliques" d="M137 101 L122 106 L121 155 L131 173 L138 150 Z" style="fill:${c("obliques")}"/>
-    <path class="muscle muscle-shape" role="button" tabindex="0" aria-label="Quads" data-muscle="quads" d="M90 219 Q82 232 82 257 L84 322 Q89 336 96 320 L101 257 L106 222 Z" style="fill:${c("quads")}"/><path class="muscle muscle-shape" role="button" tabindex="0" aria-label="Quads" data-muscle="quads" d="M130 219 Q138 232 138 257 L136 322 Q131 336 124 320 L119 257 L114 222 Z" style="fill:${c("quads")}"/>
+    <path class="muscle muscle-shape" role="button" tabindex="0" aria-label="Quads" data-muscle="quads" d="M90 219 Q82 232 82 257 L84 322 Q89 336 96 320 L98 281 L100 238 L99 222 Z" style="fill:${c("quads")}"/><path class="muscle muscle-shape" role="button" tabindex="0" aria-label="Quads" data-muscle="quads" d="M130 219 Q138 232 138 257 L136 322 Q131 336 124 320 L122 281 L120 238 L121 222 Z" style="fill:${c("quads")}"/>
+    <path class="muscle muscle-shape" role="button" tabindex="0" aria-label="Adductors" data-muscle="adductors" d="M102 222 L108 222 Q107 240 103 258 L100 276 L102 238 Z" style="fill:${c("adductors")}"/><path class="muscle muscle-shape" role="button" tabindex="0" aria-label="Adductors" data-muscle="adductors" d="M118 222 L112 222 Q113 240 117 258 L120 276 L118 238 Z" style="fill:${c("adductors")}"/>
     <path class="muscle muscle-shape" role="button" tabindex="0" aria-label="Calves" data-muscle="calves" d="M82 330 Q77 349 81 374 Q84 385 90 375 L94 337 Z" style="fill:${c("calves")}"/><path class="muscle muscle-shape" role="button" tabindex="0" aria-label="Calves" data-muscle="calves" d="M138 330 Q143 349 139 374 Q136 385 130 375 L126 337 Z" style="fill:${c("calves")}"/>
   `;
   }
@@ -3970,6 +4086,7 @@
       }
       stopRestTimer();
       state = newState();
+      state.meta.programRevision = SEED.programRevision?.id;
       save();
       applyPreferences();
       selectedProgramId = state.settings.activeProgramId;

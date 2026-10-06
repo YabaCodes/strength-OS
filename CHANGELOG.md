@@ -1,3 +1,22 @@
+## v2.11.0 — Revised program and weekly order
+
+Program
+- A revised 5-day program, offered once on Train and Programs (*Apply to my program*). The sessions are the same five, reordered so no muscle is trained hard two days in a row: Sun Legs A · Tue Shoulders + Arms · Wed Legs B · Thu Chest + Triceps · Fri Back + Biceps. Applying it also sets the week to start on Sunday.
+- It adds what the first version under-trained or missed:
+  - Side delts: 4 sets of lateral raises on Tuesday and Thursday (about 9.5 effective sets a week, up from 6.5).
+  - Calves: seated calf raise on Wednesday for the soleus; the standing raise stays on Sunday.
+  - Adductors: hip adduction on Sunday. Adductors are now tracked as a muscle (target 4–8 sets, shown on the body map).
+  - Front of the thigh: leg extension 3 sets (was 2). Lats: lat pulldown 3 sets (was 2).
+  - Abs: cable crunch replaces the weighted plank.
+  - Triceps: Tuesday uses the overhead extension instead of the pressdown.
+  - Face pull replaces Tuesday's rear-delt fly; 2 sets of shrugs for the upper traps.
+- Your current program is kept as a copy ("… (before Oct 2026)"); history, progression and this week's workouts are unchanged. *Not now* hides the offer on Train; it stays in Programs.
+- New built-in exercises: Seated Calf Raise, Cable Crunch, Hip Adduction, Face Pull, Shrug.
+
+Weekly order
+- **Still to do this week** on Train lists sessions planned earlier in the week that haven't been done, so a Friday session can be done on Saturday.
+- Today's session and the catch-up list warn when they work muscles trained in the last two days.
+
 ## v2.10.0 — Layout and polish
 
 Fixed

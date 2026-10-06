@@ -2950,3 +2950,23 @@ html[data-theme="dark"] .seg .tab:not(.active),
 html[data-theme="dark"] .seg button:not(.active) {
   color: var(--seg-text);
 }
+
+/* ---------- v2.11: weekly order and program update ---------- */
+.rest-warn {
+  color: var(--warn);
+  font-weight: 650;
+}
+.rest-ok {
+  color: var(--good);
+}
+.revision-card h2 {
+  margin-top: 2px;
+}
+.revision-list {
+  margin: 10px 0 0;
+  padding-left: 18px;
+  display: grid;
+  gap: 6px;
+  font-size: 14px;
+  line-height: 1.4;
+}

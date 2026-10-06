@@ -4,8 +4,21 @@ Strength OS is a local-first workout tracker built as a static Progressive Web A
 
 ## What is included
 
+### Default program (revised October 2026)
+Five sessions ordered so no muscle is trained hard two days in a row; the main lifts come first in each session.
+
+| Day | Session |
+| --- | --- |
+| Sunday | Legs A — squat, hack/leg press, leg extension, seated leg curl, hip adduction, standing calf raise, hanging knee raise |
+| Tuesday | Shoulders + Arms — shoulder press, lateral raise, face pull, incline press, preacher curl, overhead triceps extension, shrug |
+| Wednesday | Legs B — RDL, Bulgarian split squat, seated leg curl, seated row, seated calf raise, cable crunch |
+| Thursday | Chest + Triceps — bench, incline press, cable fly, overhead triceps extension, pressdown, lateral raise |
+| Friday | Back + Biceps — pull-up, chest-supported row, lat pulldown, rear-delt fly, incline curl, hammer curl |
+
+Existing users are offered the revision once (Train and Programs → *Apply to my program*); their previous program is kept as a copy and their history doesn't change. The Train screen lists sessions planned earlier in the week that haven't been done yet, and warns when a session works muscles trained in the last two days.
+
 ### Exercise Library
-- Built-in exercise library based on the original 5-day program
+- Built-in exercise library based on the original 5-day program, plus seated calf raise, cable crunch, hip adduction, face pull and shrug (v2.11)
 - Create custom exercises
 - Primary and secondary muscle mapping
 - Equipment, tracking type, rep/duration defaults, rest time, load increment, persistent notes
