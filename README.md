@@ -18,7 +18,7 @@ Five sessions ordered so no muscle is trained hard two days in a row; the main l
 Existing users are offered the revision once (Train and Programs → *Apply to my program*); their previous program is kept as a copy and their history doesn't change. Users who already applied it are offered the v2.12 additions (forearms, side of the hip, obliques) the same way (*Add to my program*). The Train screen lists sessions planned earlier in the week that haven't been done yet, and warns when a session works muscles trained in the last two days.
 
 ### Exercise Library
-- Built-in exercise library based on the original 5-day program, plus seated calf raise, cable crunch, hip adduction, face pull and shrug (v2.11), and wrist curl, reverse curl, hip abduction and cable woodchop (v2.12)
+- Built-in library of 67 exercises: at least three for every muscle, chosen from the most effective options (v2.13). Filter by muscle to see the best first, with **Top pick** on the top one or two
 - Every exercise shows what it targets under its name (for example "Upper chest (clavicular head)"), editable per exercise
 - Create custom exercises
 - Primary and secondary muscle mapping

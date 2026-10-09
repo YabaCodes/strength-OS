@@ -3,6 +3,13 @@
   const SEED = window.STRENGTH_OS_SEED;
   const SEED_FOCUS = Object.fromEntries(SEED.exercises.map((e) => [e.id, e.focus || ""]));
   const LATEST_PROGRAM_UPDATE = SEED.programAdditions?.id || SEED.programRevision?.id;
+  // Best-first order of the built-in exercises for each muscle (seed.js "best"); the first group is the Top pick.
+  const BEST_RANK = {},
+    TOP_PICKS = new Set();
+  Object.entries(SEED.best || {}).forEach(([muscle, [top = [], rest = []]]) => {
+    [...top, ...rest].forEach((id, i) => (BEST_RANK[`${muscle}:${id}`] = i));
+    top.forEach((id) => TOP_PICKS.add(`${muscle}:${id}`));
+  });
   const KEY = "strengthOSV2";
   const LEGACY_KEY = "strengthProteinTrackerV1";
   const MIGRATION_BACKUP_KEY = "strengthOSMigrationBackupV1";
@@ -16,7 +23,7 @@
     DB_STORE = "kv";
   const PRE_UPGRADE_DAYS = 30;
   const VERSION = 3;
-  const APP_VERSION = "2.12.0"; // Bump together with VERSION in sw.js.
+  const APP_VERSION = "2.13.0"; // Bump together with VERSION in sw.js.
   const trackingTypes = [
     ["weight_reps", "Weight + reps"],
     ["bodyweight_reps", "Bodyweight + reps"],
@@ -110,7 +117,23 @@
     });
     if ("serviceWorker" in navigator) {
       const hadController = !!navigator.serviceWorker.controller;
-      navigator.serviceWorker.register("./sw.js").catch(() => {});
+      navigator.serviceWorker
+        .register("./sw.js")
+        .then((reg) => {
+          // A phone app brought back from the background doesn't reload, so without this it only
+          // looked for a new version after being closed completely.
+          let lastCheck = Date.now();
+          const check = () => {
+            if (Date.now() - lastCheck < 10 * 60 * 1000) return;
+            lastCheck = Date.now();
+            reg.update().catch(() => {});
+          };
+          document.addEventListener("visibilitychange", () => {
+            if (document.visibilityState === "visible") check();
+          });
+          setInterval(check, 60 * 60 * 1000);
+        })
+        .catch(() => {});
       navigator.serviceWorker.addEventListener("controllerchange", () => {
         if (!hadController) return;
         updateReady = true;
@@ -902,6 +925,22 @@
     if (!ex) return "";
     if (typeof ex.focus === "string") return ex.focus;
     return SEED_FOCUS[ex.id] || "";
+  }
+  function bestRank(ex) {
+    return BEST_RANK[`${ex.primaryMuscle}:${ex.id}`] ?? Infinity;
+  }
+  function isTopPick(ex) {
+    return !!ex.builtIn && TOP_PICKS.has(`${ex.primaryMuscle}:${ex.id}`);
+  }
+  // A–Z for all muscles; with one muscle chosen, the best exercises for it come first.
+  function exerciseOrder(muscle) {
+    return (a, b) =>
+      muscle && muscle !== "all"
+        ? bestRank(a) - bestRank(b) || a.name.localeCompare(b.name)
+        : a.name.localeCompare(b.name);
+  }
+  function topPickHTML(ex) {
+    return isTopPick(ex) ? ` <span class="top-pick">Top pick</span>` : "";
   }
   function focusHTML(ex, tag = "div") {
     const f = exFocus(ex);
@@ -2418,7 +2457,7 @@
           (libraryScope === "archived" && e.archived);
         return muscleOk && searchOk && scopeOk;
       })
-      .sort((a, b) => a.name.localeCompare(b.name));
+      .sort(exerciseOrder(libraryMuscle));
     return `<div class="stack"><div class="form-grid"><label>Search<input id="librarySearchInput" value="${esc(librarySearch)}" placeholder="Exercise name"></label><label>Primary muscle<select id="libraryMuscleSelect"><option value="all">All muscles</option>${SEED.muscles.map((m) => `<option value="${m.id}" ${libraryMuscle === m.id ? "selected" : ""}>${m.name}</option>`).join("")}</select></label></div><div class="tabs seg">${[
       ["active", "Active"],
       ["custom", "Custom"],
@@ -2435,7 +2474,7 @@
         .map((e) => {
           const uses = exerciseProgramUsage(e.id).length,
             hist = exerciseHistoryUsage(e.id);
-          return `<div class="list-row click-row library-row" data-ex="${e.id}"><div><strong>${esc(e.name)}</strong>${focusHTML(e)}<div class="meta">${muscleName(e.primaryMuscle)}${(e.secondaryMuscles || []).length ? ` → ${(e.secondaryMuscles || []).map(muscleName).join(", ")}` : ""}</div><div class="meta">${esc(e.equipment)} · ${trackingLabel(e.trackingType)} · ${uses} program day${uses === 1 ? "" : "s"} · ${hist} logged session${hist === 1 ? "" : "s"}${e.archived ? " · Archived" : ""}</div></div><span class="pill ${e.archived ? "warn" : e.builtIn ? "neutral" : "good"}">${e.archived ? "Archived" : e.builtIn ? "Built-in" : "Custom"}</span></div>`;
+          return `<div class="list-row click-row library-row" data-ex="${e.id}"><div><strong>${esc(e.name)}</strong>${topPickHTML(e)}${focusHTML(e)}<div class="meta">${muscleName(e.primaryMuscle)}${(e.secondaryMuscles || []).length ? ` → ${(e.secondaryMuscles || []).map(muscleName).join(", ")}` : ""}</div><div class="meta">${esc(e.equipment)} · ${trackingLabel(e.trackingType)} · ${uses} program day${uses === 1 ? "" : "s"} · ${hist} logged session${hist === 1 ? "" : "s"}${e.archived ? " · Archived" : ""}</div></div><span class="pill ${e.archived ? "warn" : e.builtIn ? "neutral" : "good"}">${e.archived ? "Archived" : e.builtIn ? "Built-in" : "Custom"}</span></div>`;
         })
         .join("") || `<div class="empty">No exercises match.</div>`
     }</div></div>`;
@@ -2585,9 +2624,9 @@
       const q = byId("pickerSearch").value.toLowerCase();
       pickerMuscle = byId("pickerMuscle").value;
       byId("pickerList").innerHTML = pickerRows(
-        allActive().filter(
-          (e) => e.name.toLowerCase().includes(q) && (pickerMuscle === "all" || e.primaryMuscle === pickerMuscle),
-        ),
+        allActive()
+          .filter((e) => e.name.toLowerCase().includes(q) && (pickerMuscle === "all" || e.primaryMuscle === pickerMuscle))
+          .sort(exerciseOrder(pickerMuscle)),
       );
       wirePickRows();
     };
@@ -2612,7 +2651,7 @@
       list
         .map(
           (e) =>
-            `<div class="list-row click-row pick-exercise" data-ex="${e.id}"><div><strong>${esc(e.name)}</strong>${focusHTML(e)}<div class="meta">${muscleName(e.primaryMuscle)}${(e.secondaryMuscles || []).length ? ` → ${(e.secondaryMuscles || []).map(muscleName).join(", ")}` : ""} · ${esc(e.equipment)}</div></div><span>›</span></div>`,
+            `<div class="list-row click-row pick-exercise" data-ex="${e.id}"><div><strong>${esc(e.name)}</strong>${topPickHTML(e)}${focusHTML(e)}<div class="meta">${muscleName(e.primaryMuscle)}${(e.secondaryMuscles || []).length ? ` → ${(e.secondaryMuscles || []).map(muscleName).join(", ")}` : ""} · ${esc(e.equipment)}</div></div><span>›</span></div>`,
         )
         .join("") || `<div class="empty">No matching exercises.</div>`
     );

@@ -1,3 +1,22 @@
+## v2.13.0 — A fuller exercise library
+
+Exercise library
+- Every muscle now has at least three built-in exercises to choose from, picked from the most effective options for each. 29 are new:
+  - Lats: Straight-Arm Cable Pulldown, Single-Arm Dumbbell Row. Upper back: Barbell Row.
+  - Traps: Farmer's Carry, Incline Y-Raise. Lower back (had none): 45° Back Extension, Deadlift, Good Morning.
+  - Front delts: Overhead Press. Side delts: Machine Lateral Raise, Wide-Grip Cable Upright Row. Rear delts: Rear-Delt Row.
+  - Biceps: Bayesian Cable Curl, EZ-Bar Curl. Triceps: EZ-Bar Skull Crusher, Close-Grip Bench Press.
+  - Forearms: Reverse Wrist Curl, Dead Hang (with Wrist Curl and Reverse Curl from v2.12).
+  - Hamstrings: Lying Leg Curl, Nordic Curl. Glutes: Walking Lunge, Cable Glute Kickback.
+  - Adductors: Copenhagen Plank, Standing Cable Adduction. Calves: Leg Press Calf Raise.
+  - Abs: Ab Wheel Rollout. Obliques: Pallof Press, Side Plank, Dumbbell Side Bend.
+- Each new exercise has its target line, default sets, reps, rest and a technique tip. Per-side exercises say so in the tip.
+- Best first: when you filter the library or the Add exercise list by a muscle, the best exercises for it come first, and the top one or two carry a **Top pick** tag. With "All muscles" the list stays A–Z.
+- They appear in your library automatically. Your program, history, custom exercises, notes and archived exercises are unchanged.
+
+Updates
+- The app now also looks for a new version when you come back to it from the background (at most every 10 minutes, and hourly while open). Before, a phone app that was never fully closed kept running the old version, so v2.12 didn't reach everyone. When an update is ready you see the same *Reload* banner as before; nothing reloads by itself mid-workout.
+
 ## v2.12.0 — Targets and program additions
 
 Targets
