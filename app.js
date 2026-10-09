@@ -1,6 +1,8 @@
 (() => {
   "use strict";
   const SEED = window.STRENGTH_OS_SEED;
+  const SEED_FOCUS = Object.fromEntries(SEED.exercises.map((e) => [e.id, e.focus || ""]));
+  const LATEST_PROGRAM_UPDATE = SEED.programAdditions?.id || SEED.programRevision?.id;
   const KEY = "strengthOSV2";
   const LEGACY_KEY = "strengthProteinTrackerV1";
   const MIGRATION_BACKUP_KEY = "strengthOSMigrationBackupV1";
@@ -14,7 +16,7 @@
     DB_STORE = "kv";
   const PRE_UPGRADE_DAYS = 30;
   const VERSION = 3;
-  const APP_VERSION = "2.11.0"; // Bump together with VERSION in sw.js.
+  const APP_VERSION = "2.12.0"; // Bump together with VERSION in sw.js.
   const trackingTypes = [
     ["weight_reps", "Weight + reps"],
     ["bodyweight_reps", "Bodyweight + reps"],
@@ -583,7 +585,7 @@
       }
     }
     const s = newState();
-    s.meta.programRevision = SEED.programRevision?.id;
+    s.meta.programRevision = LATEST_PROGRAM_UPDATE;
     try {
       if (!dataMissing) store.set(KEY, JSON.stringify(s));
     } catch {}
@@ -668,7 +670,7 @@
 
   function migrateLegacy(old) {
     const s = newState();
-    s.meta.programRevision = SEED.programRevision?.id;
+    s.meta.programRevision = LATEST_PROGRAM_UPDATE;
     s.meta.migratedFrom = "strengthProteinTrackerV1";
     s.meta.migratedAt = Date.now();
     Object.entries(old.body || {}).forEach(([date, v]) => {
@@ -894,6 +896,17 @@
   function muscleName(id) {
     return SEED.muscles.find((m) => m.id === id)?.name || id || "Unknown";
   }
+  // The part of the muscle an exercise is meant for ("Upper chest (clavicular head)"). Built-in exercises
+  // saved before v2.12 don't carry it, so it falls back to the built-in text; an edited value always wins.
+  function exFocus(ex) {
+    if (!ex) return "";
+    if (typeof ex.focus === "string") return ex.focus;
+    return SEED_FOCUS[ex.id] || "";
+  }
+  function focusHTML(ex, tag = "div") {
+    const f = exFocus(ex);
+    return f ? `<${tag} class="focus-line">${esc(f)}</${tag}>` : "";
+  }
   function trackingLabel(id) {
     return trackingTypes.find((x) => x[0] === id)?.[1] || id;
   }
@@ -1045,7 +1058,7 @@
               .slice(0, 4)
               .map(
                 (x) =>
-                  `<div class="list-row"><div><strong>${esc(getExercise(x.exerciseId)?.name || "Missing exercise")}</strong><div class="meta">${x.sets} × ${x.min}–${x.max} · Priority ${x.priority}</div></div></div>`,
+                  `<div class="list-row"><div><strong>${esc(getExercise(x.exerciseId)?.name || "Missing exercise")}</strong>${focusHTML(getExercise(x.exerciseId))}<div class="meta">${x.sets} × ${x.min}–${x.max} · Priority ${x.priority}</div></div></div>`,
               )
               .join(
                 "",
@@ -1138,7 +1151,7 @@
       <section class="card"><div class="section-title"><h2>Exercises</h2><span class="meta">${priorityA} priority A</span></div><div class="preview-hint" style="margin-top:10px">Viewing this page does not create a workout session.</div><div class="list" style="margin-top:5px">${day.items
         .map((x, idx) => {
           const ex = getExercise(x.exerciseId) || { name: "Missing exercise", primaryMuscle: "" };
-          return `<div class="exercise-preview-row preview-exercise"><div><strong>${idx + 1}. ${esc(ex.name)}</strong><div class="meta">${x.sets} × ${x.min}–${x.max} · ${restText(x.rest)} rest</div><div class="meta">${muscleName(ex.primaryMuscle)}${ex.equipment ? ` · ${esc(ex.equipment)}` : ""}</div></div><span class="pill ${x.priority === "A" ? "good" : x.priority === "B" ? "neutral" : "warn"}">Priority ${x.priority}</span></div>`;
+          return `<div class="exercise-preview-row preview-exercise"><div><strong>${idx + 1}. ${esc(ex.name)}</strong>${focusHTML(ex)}<div class="meta">${x.sets} × ${x.min}–${x.max} · ${restText(x.rest)} rest</div><div class="meta">${muscleName(ex.primaryMuscle)}${ex.equipment ? ` · ${esc(ex.equipment)}` : ""}</div></div><span class="pill ${x.priority === "A" ? "good" : x.priority === "B" ? "neutral" : "warn"}">Priority ${x.priority}</span></div>`;
         })
         .join("")}</div></section>
       <section class="card"><div class="preview-actions"><button class="btn ghost" id="previewSkipBtn" type="button">Mark skipped</button><button class="btn ghost" id="previewEmptyBtn" type="button">Start empty workout</button></div></section>
@@ -1401,7 +1414,7 @@
           .map((x) => (getExercise(x.exerciseId) || x.exerciseSnapshot).name)
       : [];
     const canFold = itemComplete(item);
-    return `<section class="card exercise-card ${item.supersetGroup ? "superset-card" : ""}" id="exercise_${item.id}"><div class="exercise-top"><div class="row start"><div><div class="wrap"><h3>${nameHTML(ex.name)}</h3><span class="pill priority-pill">${esc(item.target?.priority || "B")}</span>${sup}${prPill}</div><div class="target">${item.target?.sets || sets.length} × ${item.target?.min || ex.defaultMin}–${item.target?.max || ex.defaultMax} · ${restText(item.target?.rest || ex.defaultRest || 90)} rest</div><div class="meta">${muscleName(ex.primaryMuscle)} · ${esc(ex.equipment || "")} · ${trackingLabel(ex.trackingType)}</div>${supNames.length ? `<div class="meta superset-link">Linked with ${supNames.map(esc).join(" + ")}</div>` : ""}</div><div class="exercise-top-actions">${canFold ? `<button class="icon-btn toggle-item" data-item="${item.id}" type="button" aria-expanded="true" aria-label="Fold ${esc(ex.name)}">⌃</button>` : ""}<button class="icon-btn exercise-menu" data-item="${item.id}" type="button" aria-label="Options for ${esc(ex.name)}">•••</button></div></div></div><div class="exercise-body">
+    return `<section class="card exercise-card ${item.supersetGroup ? "superset-card" : ""}" id="exercise_${item.id}"><div class="exercise-top"><div class="row start"><div><div class="wrap"><h3>${nameHTML(ex.name)}</h3><span class="pill priority-pill">${esc(item.target?.priority || "B")}</span>${sup}${prPill}</div>${focusHTML(ex)}<div class="target">${item.target?.sets || sets.length} × ${item.target?.min || ex.defaultMin}–${item.target?.max || ex.defaultMax} · ${restText(item.target?.rest || ex.defaultRest || 90)} rest</div><div class="meta">${muscleName(ex.primaryMuscle)} · ${esc(ex.equipment || "")} · ${trackingLabel(ex.trackingType)}</div>${supNames.length ? `<div class="meta superset-link">Linked with ${supNames.map(esc).join(" + ")}</div>` : ""}</div><div class="exercise-top-actions">${canFold ? `<button class="icon-btn toggle-item" data-item="${item.id}" type="button" aria-expanded="true" aria-label="Fold ${esc(ex.name)}">⌃</button>` : ""}<button class="icon-btn exercise-menu" data-item="${item.id}" type="button" aria-label="Options for ${esc(ex.name)}">•••</button></div></div></div><div class="exercise-body">
       ${ex.notes ? `<div class="note-box"><strong>Exercise note:</strong> ${esc(ex.notes)}</div>` : ""}
       <div class="previous"><div><strong>Previous:</strong> ${previousText(prev, ex)}</div><div><strong>Suggested:</strong> ${esc(suggestion)}</div></div>
       <div class="set-head" aria-hidden="true"><span>Set</span><span>Type</span><span>${loadHeader(ex)}</span><span>${repHeader(ex)}</span><span>${state.settings.trackRir ? "RIR" : ""}</span><span>Done</span></div>
@@ -2188,7 +2201,7 @@
     return `<section class="card program-day"><div class="program-day-head"><div class="row start"><div><h3>${nameHTML(d.name)}</h3><div class="meta">${weekdayName(d.weekday)} · ${d.items.length} exercises · ${d.items.reduce((a, x) => a + x.sets, 0)} sets · ~${estimatedDayMinutes(d)} min</div><div class="wrap" style="margin-top:7px">${plannedDayMuscleChips(d) || `<span class="meta">Add exercises to see muscle coverage.</span>`}</div></div><button class="icon-btn menu-btn day-menu" data-day="${d.id}" type="button" aria-label="Options for ${esc(d.name)}">⋯</button></div></div><div class="program-items">${d.items
       .map((it, ii) => {
         const ex = getExercise(it.exerciseId);
-        return `<div class="program-item"><button class="program-item-main edit-program-item" data-day="${d.id}" data-item="${it.id}" type="button"><strong>${nameHTML(ex?.name || "Missing exercise")}</strong><span class="meta">${it.sets} × ${it.min}–${it.max} · ${restText(it.rest)} · Priority ${it.priority}${it.supersetGroup ? ` · SS ${esc(it.supersetGroup)}` : ""}</span><span class="meta">${ex ? `${muscleName(ex.primaryMuscle)}${(ex.secondaryMuscles || []).length ? ` → ${(ex.secondaryMuscles || []).map(muscleName).join(", ")}` : ""}` : ""}</span></button><button class="icon-btn menu-btn item-menu" data-day="${d.id}" data-item="${it.id}" type="button" aria-label="Options for ${esc(ex?.name || "exercise")}">⋯</button></div>`;
+        return `<div class="program-item"><button class="program-item-main edit-program-item" data-day="${d.id}" data-item="${it.id}" type="button"><strong>${nameHTML(ex?.name || "Missing exercise")}</strong>${ex ? focusHTML(ex, "span") : ""}<span class="meta">${it.sets} × ${it.min}–${it.max} · ${restText(it.rest)} · Priority ${it.priority}${it.supersetGroup ? ` · SS ${esc(it.supersetGroup)}` : ""}</span><span class="meta">${ex ? `${muscleName(ex.primaryMuscle)}${(ex.secondaryMuscles || []).length ? ` → ${(ex.secondaryMuscles || []).map(muscleName).join(", ")}` : ""}` : ""}</span></button><button class="icon-btn menu-btn item-menu" data-day="${d.id}" data-item="${it.id}" type="button" aria-label="Options for ${esc(ex?.name || "exercise")}">⋯</button></div>`;
       })
       .join(
         "",
@@ -2422,7 +2435,7 @@
         .map((e) => {
           const uses = exerciseProgramUsage(e.id).length,
             hist = exerciseHistoryUsage(e.id);
-          return `<div class="list-row click-row library-row" data-ex="${e.id}"><div><strong>${esc(e.name)}</strong><div class="meta">${muscleName(e.primaryMuscle)}${(e.secondaryMuscles || []).length ? ` → ${(e.secondaryMuscles || []).map(muscleName).join(", ")}` : ""}</div><div class="meta">${esc(e.equipment)} · ${trackingLabel(e.trackingType)} · ${uses} program day${uses === 1 ? "" : "s"} · ${hist} logged session${hist === 1 ? "" : "s"}${e.archived ? " · Archived" : ""}</div></div><span class="pill ${e.archived ? "warn" : e.builtIn ? "neutral" : "good"}">${e.archived ? "Archived" : e.builtIn ? "Built-in" : "Custom"}</span></div>`;
+          return `<div class="list-row click-row library-row" data-ex="${e.id}"><div><strong>${esc(e.name)}</strong>${focusHTML(e)}<div class="meta">${muscleName(e.primaryMuscle)}${(e.secondaryMuscles || []).length ? ` → ${(e.secondaryMuscles || []).map(muscleName).join(", ")}` : ""}</div><div class="meta">${esc(e.equipment)} · ${trackingLabel(e.trackingType)} · ${uses} program day${uses === 1 ? "" : "s"} · ${hist} logged session${hist === 1 ? "" : "s"}${e.archived ? " · Archived" : ""}</div></div><span class="pill ${e.archived ? "warn" : e.builtIn ? "neutral" : "good"}">${e.archived ? "Archived" : e.builtIn ? "Built-in" : "Custom"}</span></div>`;
         })
         .join("") || `<div class="empty">No exercises match.</div>`
     }</div></div>`;
@@ -2454,7 +2467,7 @@
     if (!ex) return;
     const usage = exerciseProgramUsage(ex.id),
       hist = exerciseHistoryUsage(ex.id);
-    modalBody.innerHTML = `<div class="stack"><div class="note-box"><strong>${muscleName(ex.primaryMuscle)}</strong>${(ex.secondaryMuscles || []).length ? ` · secondary: ${(ex.secondaryMuscles || []).map(muscleName).join(", ")}` : ""}<br>${esc(ex.equipment)} · ${trackingLabel(ex.trackingType)}</div><div class="grid-2"><div class="metric"><span class="meta">Program use</span><strong>${usage.length}</strong><span class="small muted">program days</span></div><div class="metric"><span class="meta">History</span><strong>${hist}</strong><span class="small muted">logged sessions</span></div></div>${ex.notes ? `<div class="note-box"><strong>Exercise note:</strong> ${esc(ex.notes)}</div>` : ""}${usage.length ? `<div><p class="meta" style="font-weight:800">Used in</p><div class="list">${usage.map((u) => `<div class="list-row"><div><strong>${esc(u.day)}</strong><div class="meta">${esc(u.program)}</div></div><span class="pill neutral">${u.count}×</span></div>`).join("")}</div></div>` : ""}<div class="wrap"><button class="btn primary" id="detailEditEx" type="button">Edit</button><button class="btn ghost" id="detailDuplicateEx" type="button">Duplicate</button><button class="btn ghost" id="detailArchiveEx" type="button">${ex.archived ? "Restore" : "Archive"}</button>${!ex.builtIn ? `<button class="btn danger" id="detailDeleteEx" type="button">Delete</button>` : ""}</div></div>`;
+    modalBody.innerHTML = `<div class="stack">${exFocus(ex) ? `<div class="focus-box"><span class="meta">Targets</span><strong>${esc(exFocus(ex))}</strong></div>` : ""}<div class="note-box"><strong>${muscleName(ex.primaryMuscle)}</strong>${(ex.secondaryMuscles || []).length ? ` · secondary: ${(ex.secondaryMuscles || []).map(muscleName).join(", ")}` : ""}<br>${esc(ex.equipment)} · ${trackingLabel(ex.trackingType)}</div><div class="grid-2"><div class="metric"><span class="meta">Program use</span><strong>${usage.length}</strong><span class="small muted">program days</span></div><div class="metric"><span class="meta">History</span><strong>${hist}</strong><span class="small muted">logged sessions</span></div></div>${ex.notes ? `<div class="note-box"><strong>Exercise note:</strong> ${esc(ex.notes)}</div>` : ""}${usage.length ? `<div><p class="meta" style="font-weight:800">Used in</p><div class="list">${usage.map((u) => `<div class="list-row"><div><strong>${esc(u.day)}</strong><div class="meta">${esc(u.program)}</div></div><span class="pill neutral">${u.count}×</span></div>`).join("")}</div></div>` : ""}<div class="wrap"><button class="btn primary" id="detailEditEx" type="button">Edit</button><button class="btn ghost" id="detailDuplicateEx" type="button">Duplicate</button><button class="btn ghost" id="detailArchiveEx" type="button">${ex.archived ? "Restore" : "Archive"}</button>${!ex.builtIn ? `<button class="btn danger" id="detailDeleteEx" type="button">Delete</button>` : ""}</div></div>`;
     byId("modalTitle").textContent = ex.name;
     byId("modalEyebrow").textContent = ex.builtIn ? "Built-in exercise" : "Custom exercise";
     byId("detailEditEx").addEventListener("click", () => {
@@ -2463,6 +2476,7 @@
     });
     byId("detailDuplicateEx").addEventListener("click", () => {
       const cp = clone(ex);
+      cp.focus = exFocus(ex);
       cp.id = uid("ex");
       cp.name = `${ex.name} Copy`;
       cp.builtIn = false;
@@ -2519,7 +2533,7 @@
     openModal(
       creating ? "New exercise" : "Edit exercise",
       creating ? "Add to your library" : v.name,
-      `<div class="stack"><label>Name<input id="exName" value="${esc(v.name)}" maxlength="70"></label><div class="form-grid"><label>Primary muscle<select id="exPrimary">${SEED.muscles.map((m) => `<option value="${m.id}" ${v.primaryMuscle === m.id ? "selected" : ""}>${m.name}</option>`).join("")}</select></label><label>Equipment<select id="exEquipment">${equipments.map((x) => `<option ${v.equipment === x ? "selected" : ""}>${x}</option>`).join("")}</select></label><label>Tracking type<select id="exTracking">${trackingTypes.map(([id, n]) => `<option value="${id}" ${v.trackingType === id ? "selected" : ""}>${n}</option>`).join("")}</select></label><label>Load increment (${weightUnit()})<input id="exIncrement" type="number" step="0.5" min="0" value="${unitWeight(v.incrementKg || 0)}"></label><label>Default min<input id="exMin" type="number" min="1" max="300" value="${v.defaultMin}"></label><label>Default max<input id="exMax" type="number" min="1" max="300" value="${v.defaultMax}"></label><label>Default rest (sec)<input id="exRest" type="number" min="0" max="900" value="${v.defaultRest}"></label></div><div><p class="meta" style="font-weight:800">Secondary muscles</p><p class="meta">These count fractionally toward muscle analytics using your secondary-set multiplier.</p><div class="checks">${SEED.muscles.map((m) => `<label class="check-chip"><input class="secondary-muscle" type="checkbox" value="${m.id}" ${(v.secondaryMuscles || []).includes(m.id) ? "checked" : ""}><span>${m.name}</span></label>`).join("")}</div></div><label>Persistent exercise note<textarea id="exNotes">${esc(v.notes || "")}</textarea></label>${!creating ? `<label class="check-chip"><input id="exArchived" type="checkbox" ${v.archived ? "checked" : ""}><span>Archived</span></label>` : ""}</div>`,
+      `<div class="stack"><label>Name<input id="exName" value="${esc(v.name)}" maxlength="70"></label><label>Targets <span class="meta">optional · shown under the name</span><input id="exFocus" value="${esc(exFocus(v))}" maxlength="60" placeholder="e.g. Upper chest, Triceps long head"></label><div class="form-grid"><label>Primary muscle<select id="exPrimary">${SEED.muscles.map((m) => `<option value="${m.id}" ${v.primaryMuscle === m.id ? "selected" : ""}>${m.name}</option>`).join("")}</select></label><label>Equipment<select id="exEquipment">${equipments.map((x) => `<option ${v.equipment === x ? "selected" : ""}>${x}</option>`).join("")}</select></label><label>Tracking type<select id="exTracking">${trackingTypes.map(([id, n]) => `<option value="${id}" ${v.trackingType === id ? "selected" : ""}>${n}</option>`).join("")}</select></label><label>Load increment (${weightUnit()})<input id="exIncrement" type="number" step="0.5" min="0" value="${unitWeight(v.incrementKg || 0)}"></label><label>Default min<input id="exMin" type="number" min="1" max="300" value="${v.defaultMin}"></label><label>Default max<input id="exMax" type="number" min="1" max="300" value="${v.defaultMax}"></label><label>Default rest (sec)<input id="exRest" type="number" min="0" max="900" value="${v.defaultRest}"></label></div><div><p class="meta" style="font-weight:800">Secondary muscles</p><p class="meta">These count fractionally toward muscle analytics using your secondary-set multiplier.</p><div class="checks">${SEED.muscles.map((m) => `<label class="check-chip"><input class="secondary-muscle" type="checkbox" value="${m.id}" ${(v.secondaryMuscles || []).includes(m.id) ? "checked" : ""}><span>${m.name}</span></label>`).join("")}</div></div><label>Persistent exercise note<textarea id="exNotes">${esc(v.notes || "")}</textarea></label>${!creating ? `<label class="check-chip"><input id="exArchived" type="checkbox" ${v.archived ? "checked" : ""}><span>Archived</span></label>` : ""}</div>`,
       `<button class="btn primary" id="saveExerciseBtn" type="button">${creating ? "Create exercise" : "Save"}</button>`,
     );
     byId("saveExerciseBtn").addEventListener("click", () => {
@@ -2541,6 +2555,7 @@
         defaultMax: clamp(byId("exMax").value, 1, 300) || 12,
         defaultRest: clamp(byId("exRest").value, 0, 900) ?? 90,
         notes: byId("exNotes").value.trim(),
+        focus: byId("exFocus").value.trim(),
         archived: byId("exArchived")?.checked || false,
         updatedAt: Date.now(),
       });
@@ -2597,7 +2612,7 @@
       list
         .map(
           (e) =>
-            `<div class="list-row click-row pick-exercise" data-ex="${e.id}"><div><strong>${esc(e.name)}</strong><div class="meta">${muscleName(e.primaryMuscle)}${(e.secondaryMuscles || []).length ? ` → ${(e.secondaryMuscles || []).map(muscleName).join(", ")}` : ""} · ${esc(e.equipment)}</div></div><span>›</span></div>`,
+            `<div class="list-row click-row pick-exercise" data-ex="${e.id}"><div><strong>${esc(e.name)}</strong>${focusHTML(e)}<div class="meta">${muscleName(e.primaryMuscle)}${(e.secondaryMuscles || []).length ? ` → ${(e.secondaryMuscles || []).map(muscleName).join(", ")}` : ""} · ${esc(e.equipment)}</div></div><span>›</span></div>`,
         )
         .join("") || `<div class="empty">No matching exercises.</div>`
     );
@@ -2943,28 +2958,75 @@
       .join("")}</div></section>`;
   }
 
-  // ---------- program revision (offered once, applied only on request) ----------
-  function revisionPending() {
-    const r = SEED.programRevision;
-    return !!r && state.meta.programRevision !== r.id && Object.keys(state.programs || {}).length > 0;
+  // ---------- program updates (offered once, applied only on request) ----------
+  // Someone who never applied the October revision is offered the whole revised program (which already
+  // includes the later additions); someone who did is offered only the additions, added to their program.
+  function pendingProgramUpdate() {
+    const full = SEED.programRevision,
+      add = SEED.programAdditions,
+      cur = state.meta.programRevision;
+    if (!Object.keys(state.programs || {}).length) return null;
+    if (add && full && cur === full.id) return { kind: "additions", ...add };
+    if (full && cur !== full.id && cur !== add?.id) return { kind: "full", ...full };
+    return null;
   }
   function revisionCardHTML(where) {
-    const r = SEED.programRevision;
-    if (!revisionPending() || (where === "train" && state.meta.programRevisionDismissed === r.id)) return "";
-    return `<section class="card revision-card"><p class="eyebrow">Program update</p><h2>${esc(r.title)}</h2><p class="meta">${esc(r.summary)}</p><ul class="revision-list">${r.changes.map((c) => `<li>${esc(c)}</li>`).join("")}</ul><div class="preview-actions" style="margin-top:12px"><button class="btn primary" id="applyRevisionBtn" type="button">Apply to my program</button>${where === "train" ? `<button class="btn ghost" id="dismissRevisionBtn" type="button">Not now</button>` : ""}</div><p class="meta" style="margin-top:8px">Your current program is kept as a copy in Programs, and your history doesn't change.</p></section>`;
+    const u = pendingProgramUpdate();
+    if (!u || (where === "train" && state.meta.programRevisionDismissed === u.id)) return "";
+    const full = u.kind === "full";
+    return `<section class="card revision-card"><p class="eyebrow">Program update</p><h2>${esc(u.title)}</h2><p class="meta">${esc(u.summary)}</p><ul class="revision-list">${u.changes.map((c) => `<li>${esc(c)}</li>`).join("")}</ul><div class="preview-actions" style="margin-top:12px"><button class="btn primary" id="applyRevisionBtn" type="button">${full ? "Apply to my program" : "Add to my program"}</button>${where === "train" ? `<button class="btn ghost" id="dismissRevisionBtn" type="button">Not now</button>` : ""}</div><p class="meta" style="margin-top:8px">${full ? "Your current program is kept as a copy in Programs, and your history doesn't change." : "Nothing in your program is removed, and your history doesn't change."}</p></section>`;
   }
   function wireRevisionCard(rerender) {
     byId("applyRevisionBtn")?.addEventListener("click", () => {
-      applyProgramRevision();
-      rerender();
-      showToast("Revised program applied. Your previous one is saved in Programs.");
+      const u = pendingProgramUpdate();
+      if (!u) return rerender();
+      if (u.kind === "full") {
+        applyProgramRevision();
+        rerender();
+        showToast("Revised program applied. Your previous one is saved in Programs.");
+      } else {
+        const n = applyProgramAdditions();
+        rerender();
+        showToast(n ? `${n} exercise${n === 1 ? "" : "s"} added to your program.` : "Your program already has these exercises.");
+      }
     });
     byId("dismissRevisionBtn")?.addEventListener("click", () => {
-      state.meta.programRevisionDismissed = SEED.programRevision.id;
+      state.meta.programRevisionDismissed = pendingProgramUpdate()?.id;
       save();
       rerender();
-      showToast("You can apply it later from Programs.");
+      showToast("You can add it later from Programs.");
     });
+  }
+  function addExerciseCues(cues) {
+    Object.entries(cues || {}).forEach(([id, note]) => {
+      const ex = state.exercises[id];
+      if (ex && !ex.notes) ex.notes = note;
+    });
+  }
+  function applyProgramAdditions() {
+    const a = SEED.programAdditions,
+      p = activeProgram();
+    let added = 0;
+    if (p)
+      a.adds.forEach(({ dayId, after, item, pairWith }) => {
+        const day = p.days.find((d) => d.id === dayId);
+        if (!day || day.items.some((i) => i.exerciseId === item.exerciseId)) return;
+        const at = day.items.findIndex((i) => i.exerciseId === after),
+          it = { ...clone(item), id: uid("pi") };
+        day.items.splice(at >= 0 ? at + 1 : day.items.length, 0, it);
+        // Pair it with its partner as a superset, keeping a group the partner already has.
+        const partner = pairWith ? day.items.find((i) => i.exerciseId === pairWith) : null;
+        if (partner) {
+          if (partner.supersetGroup) it.supersetGroup = partner.supersetGroup;
+          else partner.supersetGroup = it.supersetGroup;
+        }
+        added++;
+      });
+    addExerciseCues(a.notes);
+    if (p) p.updatedAt = Date.now();
+    state.meta.programRevision = a.id;
+    save();
+    return added;
   }
   function applyProgramRevision() {
     const r = SEED.programRevision,
@@ -2990,17 +3052,15 @@
       state.settings.activeProgramId = id;
     }
     // Technique cues on the existing exercises the revision leans on, only where there's no note yet.
-    const cues = {
+    addExerciseCues({
       lateral_raise: "Cable or dumbbell; keep tension at the bottom of the rep.",
       standing_calf: "Pause 1–2 s in the bottom stretch.",
       oh_tri: "Overhead position: more long-head growth than pressdowns.",
-    };
-    Object.entries(cues).forEach(([id, note]) => {
-      const ex = state.exercises[id];
-      if (ex && !ex.notes) ex.notes = note;
+      ...(SEED.programAdditions?.notes || {}),
     });
     state.settings.weekStarts = "sunday";
-    state.meta.programRevision = r.id;
+    // The seed program already includes the later additions.
+    state.meta.programRevision = LATEST_PROGRAM_UPDATE;
     selectedProgramId = state.settings.activeProgramId;
     save();
   }
@@ -4086,7 +4146,7 @@
       }
       stopRestTimer();
       state = newState();
-      state.meta.programRevision = SEED.programRevision?.id;
+      state.meta.programRevision = LATEST_PROGRAM_UPDATE;
       save();
       applyPreferences();
       selectedProgramId = state.settings.activeProgramId;

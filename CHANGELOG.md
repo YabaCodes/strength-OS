@@ -1,3 +1,18 @@
+## v2.12.0 — Targets and program additions
+
+Targets
+- Every exercise shows the part of the muscle it's for, in a line under its name: in Programs, today's session on Train, the workout preview, the live workout, the exercise library and the exercise picker. For example: bench press → "Mid & lower chest (sternal head)", incline press → "Upper chest (clavicular head)", overhead extension → "Triceps long head", seated calf raise → "Calves: soleus".
+- Exercise details show it as **Targets**. It can be changed in the exercise's edit form; custom exercises start empty.
+- It's an extra line: the existing muscle lines ("Chest → Triceps, Front Delts" and so on) stay where they were.
+
+Program additions (offered once: *Add to my program*)
+- Forearms: wrist curl and reverse curl on Friday, as a superset after the hammer curl.
+- Side of the hip: hip abduction on Sunday, as a superset with hip adduction.
+- Obliques: cable woodchop on Wednesday, after the cable crunch.
+- Tips added to the cable fly (pulleys high, pull down and in, for the lower chest) and leg extension (recline the seat, for the rectus femoris), only where the exercise has no note yet.
+- Nothing else in the program changes. Anyone who hasn't applied the October revision yet gets these with it.
+- New built-in exercises: Wrist Curl, Reverse Curl, Hip Abduction, Cable Woodchop.
+
 ## v2.11.0 — Revised program and weekly order
 
 Program
