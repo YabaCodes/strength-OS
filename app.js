@@ -23,7 +23,7 @@
     DB_STORE = "kv";
   const PRE_UPGRADE_DAYS = 30;
   const VERSION = 3;
-  const APP_VERSION = "2.13.0"; // Bump together with VERSION in sw.js.
+  const APP_VERSION = "2.13.1"; // Bump together with VERSION in sw.js.
   const trackingTypes = [
     ["weight_reps", "Weight + reps"],
     ["bodyweight_reps", "Bodyweight + reps"],
@@ -911,7 +911,7 @@
     return state.settings.units === "lb" ? round1(kg * 2.2046226218) : round1(kg);
   }
   function toKg(display) {
-    return state.settings.units === "lb" ? num(display) / 2.2046226218 : num(display);
+    return state.settings.units === "lb" ? numIn(display) / 2.2046226218 : numIn(display);
   }
   function weightUnit() {
     return state.settings.units;
@@ -986,17 +986,18 @@
   function allWorkingSets(item) {
     return (item.sets || []).filter((s) => s.type !== "warmup");
   }
-  function previousExerciseSession(exerciseId, beforeDate, excludeSessionId = null) {
+  // The last time this exercise was actually done: a workout where it was skipped (no ticked sets) is passed
+  // over, so "Previous" and the pre-filled sets come from real numbers instead of going blank.
+  function previousExerciseEntry(exerciseId, beforeDate, excludeSessionId = null) {
     const list = exerciseEntries(exerciseId);
     for (let i = list.length - 1; i >= 0; i--) {
-      const s = list[i].session;
-      if (s.id !== excludeSessionId && s.date <= beforeDate) return s;
+      const e = list[i];
+      if (e.session.id !== excludeSessionId && e.session.date <= beforeDate && e.sets.length) return e;
     }
     return null;
   }
   function previousExerciseItem(exerciseId, beforeDate, excludeSessionId = null) {
-    const s = previousExerciseSession(exerciseId, beforeDate, excludeSessionId);
-    return s?.items.find((i) => i.exerciseId === exerciseId) || null;
+    return previousExerciseEntry(exerciseId, beforeDate, excludeSessionId)?.item || null;
   }
   function e1rm(loadKg, reps) {
     if (loadKg <= 0 || reps <= 0 || reps > 20) return 0;
@@ -1012,6 +1013,66 @@
   }
   function isDurationBased(ex) {
     return ["duration", "weight_duration"].includes(ex.trackingType);
+  }
+  function usesLoad(ex) {
+    return !["reps_only", "bodyweight_reps", "duration"].includes(ex.trackingType);
+  }
+  // A number typed into a set. Accepts a comma as the decimal mark ("22,5"), as some phone keyboards type it.
+  function numIn(v) {
+    return num(String(v ?? "").trim().replace(",", "."));
+  }
+  // What you usually do on an exercise: the middle of each workout's best (load, reps or seconds), taking the lower
+  // of the two middle values. A median, so a typo or two in the history doesn't make the next typo look normal.
+  function typicalTop(entries, field) {
+    const tops = entries
+      .map((e) => Math.max(0, ...e.sets.map((s) => num(s[field]))))
+      .filter((v) => v > 0)
+      .sort((a, b) => a - b);
+    return tops.length ? tops[(tops.length - 1) >> 1] : 0;
+  }
+  // Numbers like "2220" (tapping into "20" and typing "22") or "1012" reps are almost always typos.
+  function unlikelyLoad(load, ref) {
+    return ref > 0 ? load > ref * 2 && load - ref >= 10 : load > 400;
+  }
+  function unlikelyAmount(v, ref, field, targetMax) {
+    const limit = ref > 0 ? Math.max(ref * 3, ref + (field === "reps" ? 20 : 120)) : Math.max(targetMax * 3, field === "reps" ? 50 : 600);
+    return v > limit;
+  }
+  // Before a set is logged: is it far outside what you usually do on this exercise?
+  // Returns { text, field: "load" | "amount" }, or null when it looks fine.
+  function unlikelySet(session, item, ex, st) {
+    if (st.type === "warmup") return null;
+    const entries = exerciseEntries(item.exerciseId)
+      .filter((e) => e.session.id !== session.id && e.session.date <= session.date && e.sets.length)
+      .slice(-6);
+    // A value you already confirmed on an earlier set of this workout isn't asked about again.
+    const today = item.sets.filter((x) => x !== st && x.complete && x.type !== "warmup");
+    const u = weightUnit();
+    const load = num(st.loadKg);
+    if (usesLoad(ex) && load > 0 && !today.some((x) => num(x.loadKg) >= load)) {
+      const ref = typicalTop(entries, "loadKg");
+      if (unlikelyLoad(load, ref))
+        return {
+          field: "load",
+          text: ref
+            ? `${ex.name}: ${unitWeight(load)} ${u} is more than twice what you usually do (about ${unitWeight(ref)} ${u}).`
+            : `${ex.name}: ${unitWeight(load)} ${u} is very heavy.`,
+        };
+    }
+    const field = isDurationBased(ex) ? "durationSec" : isRepBased(ex) ? "reps" : null;
+    const v = field ? num(st[field]) : 0;
+    if (field && v > 0 && !today.some((x) => num(x[field]) >= v)) {
+      const ref = typicalTop(entries, field);
+      if (unlikelyAmount(v, ref, field, num(item.target?.max || ex.defaultMax)))
+        return {
+          field: "amount",
+          text:
+            field === "reps"
+              ? `${ex.name}: ${v} reps is far more than usual${ref ? ` (about ${ref})` : ""}.`
+              : `${ex.name}: ${v} s is far longer than usual${ref ? ` (about ${ref} s)` : ""}.`,
+        };
+    }
+    return null;
   }
 
   function navigate(v) {
@@ -1445,7 +1506,8 @@
     if (collapsed) {
       return `<section class="card exercise-card collapsed ${item.supersetGroup ? "superset-card" : ""}" id="exercise_${item.id}"><button class="exercise-collapsed-btn toggle-item" data-item="${item.id}" type="button" aria-expanded="false"><span class="exercise-collapsed-check" aria-hidden="true">✓</span><span class="exercise-collapsed-text"><strong>${esc(ex.name)}</strong><span class="meta">${workingSets(item).map((st) => setSummary(st, ex)).join(" · ")}</span></span>${prPill}<span class="row-chevron" aria-hidden="true">›</span></button></section>`;
     }
-    const prev = previousExerciseItem(item.exerciseId, addDays(session.date, -1), session.id);
+    const prevEntry = previousExerciseEntry(item.exerciseId, addDays(session.date, -1), session.id),
+      prev = prevEntry?.item || null;
     const suggestion = suggestLoad(ex, item, prev);
     const supNames = item.supersetGroup
       ? session.items
@@ -1455,7 +1517,7 @@
     const canFold = itemComplete(item);
     return `<section class="card exercise-card ${item.supersetGroup ? "superset-card" : ""}" id="exercise_${item.id}"><div class="exercise-top"><div class="row start"><div><div class="wrap"><h3>${nameHTML(ex.name)}</h3><span class="pill priority-pill">${esc(item.target?.priority || "B")}</span>${sup}${prPill}</div>${focusHTML(ex)}<div class="target">${item.target?.sets || sets.length} × ${item.target?.min || ex.defaultMin}–${item.target?.max || ex.defaultMax} · ${restText(item.target?.rest || ex.defaultRest || 90)} rest</div><div class="meta">${muscleName(ex.primaryMuscle)} · ${esc(ex.equipment || "")} · ${trackingLabel(ex.trackingType)}</div>${supNames.length ? `<div class="meta superset-link">Linked with ${supNames.map(esc).join(" + ")}</div>` : ""}</div><div class="exercise-top-actions">${canFold ? `<button class="icon-btn toggle-item" data-item="${item.id}" type="button" aria-expanded="true" aria-label="Fold ${esc(ex.name)}">⌃</button>` : ""}<button class="icon-btn exercise-menu" data-item="${item.id}" type="button" aria-label="Options for ${esc(ex.name)}">•••</button></div></div></div><div class="exercise-body">
       ${ex.notes ? `<div class="note-box"><strong>Exercise note:</strong> ${esc(ex.notes)}</div>` : ""}
-      <div class="previous"><div><strong>Previous:</strong> ${previousText(prev, ex)}</div><div><strong>Suggested:</strong> ${esc(suggestion)}</div></div>
+      <div class="previous">${previousHTML(prevEntry, ex, session)}<div><strong>Suggested:</strong> ${esc(suggestion)}</div></div>
       <div class="set-head" aria-hidden="true"><span>Set</span><span>Type</span><span>${loadHeader(ex)}</span><span>${repHeader(ex)}</span><span>${state.settings.trackRir ? "RIR" : ""}</span><span>Done</span></div>
       <div id="sets_${item.id}">${sets.map((st, i) => liveSetRow(session, item, ex, st, i, prev)).join("")}</div>
       <div class="exercise-actions"><button class="btn ghost small-btn use-prev" data-item="${item.id}" type="button" aria-label="Use previous values">Previous</button><button class="btn ghost small-btn add-set" data-item="${item.id}" type="button">+ Set</button><button class="btn ghost small-btn add-warmup" data-item="${item.id}" type="button">+ Warm-up</button><button class="btn ghost small-btn remove-last-set" data-item="${item.id}" type="button">− Set</button><button class="btn ghost small-btn rest-now" data-item="${item.id}" type="button">Rest</button></div>
@@ -1514,18 +1576,21 @@
     const prevSet = ord >= 0 ? workingSets(prev || { sets: [] })[ord] : null;
     const prs = instantSetPRs(session, item, s);
     const setName = s.type === "warmup" ? "Warm-up set" : `Set ${ord + 1}`;
-    return `<div class="set-entry ${s.complete ? "complete" : ""}" data-set-entry="${s.id}"><div class="set-row" data-set="${s.id}"><span class="set-num" aria-hidden="true">${s.type === "warmup" ? "W" : ord + 1}</span><select class="set-type" data-set="${s.id}" aria-label="${setName} type">${setTypes.map(([v, l]) => `<option value="${v}" ${s.type === v ? "selected" : ""}>${l}</option>`).join("")}</select><input class="set-load" data-set="${s.id}" inputmode="decimal" type="number" step="0.5" min="0" value="${esc(loadShown)}" placeholder="${["reps_only", "bodyweight_reps", "duration"].includes(ex.trackingType) ? "—" : weightUnit()}" aria-label="${setName} ${esc(loadHeader(ex))}"><input class="set-reps" data-set="${s.id}" inputmode="decimal" type="number" step="${ex.trackingType === "distance_duration" ? "0.1" : "1"}" min="0" value="${second || ""}" placeholder="${repHeader(ex)}" aria-label="${setName} ${repHeader(ex).toLowerCase()}"><input class="set-rir" data-set="${s.id}" inputmode="numeric" type="number" min="0" max="5" step="1" value="${s.rir ?? ""}" aria-label="${setName} reps in reserve" ${state.settings.trackRir && s.type !== "warmup" ? "" : "disabled"}><button class="done-btn ${s.complete ? "done" : ""}" data-set="${s.id}" type="button" aria-pressed="${s.complete ? "true" : "false"}" aria-label="${s.complete ? "Reopen" : "Complete"} ${setName.toLowerCase()}">✓</button></div>${s.type !== "warmup" ? `<div class="set-prev-line"><span>${esc(previousSetCompact(ex, prevSet))}</span>${prs.length ? `<span class="pr-inline">★ ${prs.join(" + ")}</span>` : ""}</div>` : ""}</div>`;
+    return `<div class="set-entry ${s.complete ? "complete" : ""}" data-set-entry="${s.id}"><div class="set-row" data-set="${s.id}"><span class="set-num" aria-hidden="true">${s.type === "warmup" ? "W" : ord + 1}</span><select class="set-type" data-set="${s.id}" aria-label="${setName} type">${setTypes.map(([v, l]) => `<option value="${v}" ${s.type === v ? "selected" : ""}>${l}</option>`).join("")}</select><input class="set-load" data-set="${s.id}" type="text" inputmode="decimal" autocomplete="off" autocorrect="off" spellcheck="false" value="${esc(loadShown)}" placeholder="${["reps_only", "bodyweight_reps", "duration"].includes(ex.trackingType) ? "—" : weightUnit()}" aria-label="${setName} ${esc(loadHeader(ex))}"><input class="set-reps" data-set="${s.id}" type="text" inputmode="${ex.trackingType === "distance_duration" ? "decimal" : "numeric"}" autocomplete="off" autocorrect="off" spellcheck="false" value="${second || ""}" placeholder="${repHeader(ex)}" aria-label="${setName} ${repHeader(ex).toLowerCase()}"><input class="set-rir" data-set="${s.id}" type="text" inputmode="numeric" autocomplete="off" autocorrect="off" spellcheck="false" maxlength="1" value="${s.rir ?? ""}" aria-label="${setName} reps in reserve" ${state.settings.trackRir && s.type !== "warmup" ? "" : "disabled"}><button class="done-btn ${s.complete ? "done" : ""}" data-set="${s.id}" type="button" aria-pressed="${s.complete ? "true" : "false"}" aria-label="${s.complete ? "Reopen" : "Complete"} ${setName.toLowerCase()}">✓</button></div>${s.type !== "warmup" ? `<div class="set-prev-line"><span>${esc(previousSetCompact(ex, prevSet))}</span>${prs.length ? `<span class="pr-inline">★ ${prs.join(" + ")}</span>` : ""}</div>` : ""}</div>`;
   }
 
-  function prefillSessionItem(item, date, excludeSessionId = null) {
+  // keepDone: leave sets you've already ticked in this workout as they are (the "Previous" button).
+  function prefillSessionItem(item, date, excludeSessionId = null, keepDone = false) {
     const ex = getExercise(item.exerciseId) || item.exerciseSnapshot;
     const prev = previousExerciseItem(item.exerciseId, addDays(date, -1), excludeSessionId);
-    if (!prev) return item;
+    if (!prev) return 0;
     const prior = workingSets(prev),
       current = allWorkingSets(item);
+    let filled = 0;
     current.forEach((st, i) => {
       const p = prior[i];
-      if (!p) return;
+      if (!p || (keepDone && st.complete)) return;
+      filled++;
       if (!["reps_only", "bodyweight_reps", "duration"].includes(ex.trackingType)) st.loadKg = p.loadKg || 0;
       if (isDurationBased(ex)) st.durationSec = p.durationSec || 0;
       else if (ex.trackingType === "distance_duration") st.distanceKm = p.distanceKm || 0;
@@ -1533,7 +1598,41 @@
       st.rir = null;
       st.complete = false;
     });
-    return item;
+    return filled;
+  }
+
+  // Tapping into a filled-in number selects it, so typing replaces it. Otherwise the cursor lands next to the
+  // old number and "20" then "22" becomes "2220", which then gets logged and pre-filled into every later workout.
+  function selectOnFocus(el) {
+    let fresh = false,
+      start = "";
+    const all = () => {
+      // Once you've started typing, leave the field alone.
+      if (document.activeElement !== el || el.value !== start) return;
+      try {
+        el.setSelectionRange(0, el.value.length);
+      } catch {
+        try {
+          el.select();
+        } catch {}
+      }
+    };
+    el.addEventListener("focus", () => {
+      fresh = true;
+      start = el.value;
+      all();
+      setTimeout(all, 0);
+    });
+    // The tap that focused the field would otherwise drop the cursor where the finger was, undoing the selection.
+    // Only that first tap: tapping again places the cursor as usual.
+    el.addEventListener("mouseup", (e) => {
+      if (!fresh) return;
+      fresh = false;
+      e.preventDefault();
+      all();
+    });
+    el.addEventListener("input", () => (fresh = false));
+    el.addEventListener("blur", () => (fresh = false));
   }
 
   function wireLiveExercise(session, item, idx) {
@@ -1560,6 +1659,11 @@
       }
     };
     const rerender = (anchor) => refreshLive(session, [item.id, previousTouched], anchor || `#exercise_${item.id}`);
+    const setAmount = (st, v) => {
+      if (isDurationBased(ex)) st.durationSec = Math.max(0, numIn(v));
+      else if (ex.trackingType === "distance_duration") st.distanceKm = Math.max(0, numIn(v));
+      else st.reps = Math.max(0, numIn(v));
+    };
     // Read the inputs of a set row straight from the screen, in case iOS hasn't fired "change" yet.
     const syncRow = (st) => {
       const row = root.querySelector(`.set-row[data-set="${st.id}"]`);
@@ -1567,14 +1671,19 @@
       const load = row.querySelector(".set-load"),
         reps = row.querySelector(".set-reps"),
         rir = row.querySelector(".set-rir");
-      if (load && load.value !== "") st.loadKg = Math.max(0, toKg(load.value));
-      if (reps && reps.value !== "") {
-        if (isDurationBased(ex)) st.durationSec = Math.max(0, num(reps.value));
-        else if (ex.trackingType === "distance_duration") st.distanceKm = Math.max(0, num(reps.value));
-        else st.reps = Math.max(0, num(reps.value));
-      }
-      if (rir && !rir.disabled) st.rir = rir.value === "" ? null : clamp(rir.value, 0, 5);
+      if (load && load.value.trim() !== "") st.loadKg = Math.max(0, toKg(load.value));
+      if (reps && reps.value.trim() !== "") setAmount(st, reps.value);
+      if (rir && !rir.disabled) st.rir = rir.value.trim() === "" ? null : clamp(numIn(rir.value), 0, 5);
     };
+    // Changing a number on a set that's already logged gets the same typo check as ticking it.
+    const keepChange = (st, before) => {
+      if (!st.complete) return true;
+      const odd = unlikelySet(session, item, ex, st);
+      if (!odd || confirm(`${odd.text}\n\nKeep it? Cancel puts back what was there.`)) return true;
+      Object.assign(st, before);
+      return false;
+    };
+    root.querySelectorAll(".set-load, .set-reps, .set-rir").forEach(selectOnFocus);
     root.querySelectorAll(".set-type").forEach((el) =>
       el.addEventListener("change", () => {
         const st = item.sets.find((x) => x.id === el.dataset.set);
@@ -1588,7 +1697,9 @@
     root.querySelectorAll(".set-load").forEach((el) =>
       el.addEventListener("change", () => {
         const st = item.sets.find((x) => x.id === el.dataset.set);
+        const before = { loadKg: st.loadKg };
         st.loadKg = Math.max(0, toKg(el.value));
+        if (!keepChange(st, before)) el.value = st.loadKg ? unitWeight(st.loadKg) : "";
         touch();
         save();
       }),
@@ -1596,9 +1707,10 @@
     root.querySelectorAll(".set-reps").forEach((el) =>
       el.addEventListener("change", () => {
         const st = item.sets.find((x) => x.id === el.dataset.set);
-        if (isDurationBased(ex)) st.durationSec = Math.max(0, num(el.value));
-        else if (ex.trackingType === "distance_duration") st.distanceKm = Math.max(0, num(el.value));
-        else st.reps = Math.max(0, num(el.value));
+        const before = { reps: st.reps, durationSec: st.durationSec, distanceKm: st.distanceKm };
+        setAmount(st, el.value);
+        if (!keepChange(st, before))
+          el.value = (isDurationBased(ex) ? st.durationSec : ex.trackingType === "distance_duration" ? st.distanceKm : st.reps) || "";
         touch();
         save();
       }),
@@ -1606,7 +1718,7 @@
     root.querySelectorAll(".set-rir").forEach((el) =>
       el.addEventListener("change", () => {
         const st = item.sets.find((x) => x.id === el.dataset.set);
-        st.rir = el.value === "" ? null : clamp(el.value, 0, 5);
+        st.rir = el.value.trim() === "" ? null : clamp(numIn(el.value), 0, 5);
         touch();
         save();
       }),
@@ -1615,6 +1727,17 @@
       el.addEventListener("click", () => {
         const st = item.sets.find((x) => x.id === el.dataset.set);
         syncRow(st);
+        // A number far outside what you usually do is almost always a typo: ask before it's logged, because
+        // whatever is logged becomes "Previous" and is pre-filled into the next workout.
+        if (!st.complete) {
+          const odd = unlikelySet(session, item, ex, st);
+          if (odd && !confirm(`${odd.text}\n\nLog it anyway? Cancel lets you fix it first.`)) {
+            save();
+            const field = root.querySelector(`.set-row[data-set="${st.id}"] ${odd.field === "load" ? ".set-load" : ".set-reps"}`);
+            field?.focus();
+            return;
+          }
+        }
         st.complete = !st.complete;
         const justCompleted = st.complete;
         touch();
@@ -1636,11 +1759,18 @@
       }),
     );
     card.querySelector(".use-prev").addEventListener("click", () => {
-      prefillSessionItem(item, session.date, session.id);
+      // Only the sets you haven't ticked yet: what you've already logged today stays.
+      const filled = prefillSessionItem(item, session.date, session.id, true);
       touch();
       save();
       rerender();
-      showToast(`${ex.name}: previous values restored.`);
+      showToast(
+        filled
+          ? `${ex.name}: previous values filled in.`
+          : previousExerciseItem(item.exerciseId, addDays(session.date, -1), session.id)
+            ? `${ex.name}: every set with a previous value is already ticked.`
+            : `${ex.name}: no previous workout to copy from yet.`,
+      );
     });
     card.querySelector(".add-set").addEventListener("click", () => {
       const st = newSet("normal");
@@ -1703,18 +1833,44 @@
       return !nth || nth.complete;
     });
   }
-  function previousText(prev, ex) {
-    if (!prev) return "No previous logged session";
-    const sets = workingSets(prev);
-    if (!sets.length) return "No completed working sets";
-    const load = sets.map((s) => s.loadKg).filter((v) => v > 0);
-    const loadText = load.length
-      ? `${unitWeight(Math.max(...load))} ${weightUnit()}`
-      : ex.trackingType.includes("bodyweight")
-        ? "Bodyweight"
-        : "—";
-    const reps = sets.map((s) => (isDurationBased(ex) ? `${s.durationSec}s` : s.reps)).join(" / ");
-    return `${loadText} · ${reps}`;
+  // Each set as it was done, sets at the same weight grouped: "20 kg × 12, 10 · 22.5 kg × 8".
+  // (It used to show the heaviest weight next to every set's reps, as if all sets were done at that weight.)
+  function setsSummaryText(sets, ex) {
+    const u = weightUnit(),
+      t = ex.trackingType;
+    const loadOf = (s) => {
+      const w = num(s.loadKg);
+      if (!usesLoad(ex)) return "";
+      if (t === "bodyweight_added") return w > 0 ? `BW + ${unitWeight(w)} ${u}` : "BW";
+      if (t === "assisted_bodyweight") return w > 0 ? `${unitWeight(w)} ${u} assist` : "BW";
+      return w > 0 ? `${unitWeight(w)} ${u}` : "";
+    };
+    const amountOf = (s) =>
+      isDurationBased(ex) ? `${num(s.durationSec)} s` : t === "distance_duration" ? `${num(s.distanceKm)} km` : `${num(s.reps)}`;
+    const groups = [];
+    sets.forEach((s) => {
+      const load = loadOf(s),
+        last = groups.at(-1);
+      if (last && last.load === load) last.amounts.push(amountOf(s));
+      else groups.push({ load, amounts: [amountOf(s)] });
+    });
+    const reps = isRepBased(ex) && !isDurationBased(ex);
+    return groups
+      .map((g) => (g.load ? `${g.load} × ${g.amounts.join(", ")}` : `${g.amounts.join(", ")}${reps ? " reps" : ""}`))
+      .join(" · ");
+  }
+  // "Previous (Thu, Oct 8 · Chest + Triceps): 9 kg × 15, 14, 13, 12" — the date says where the numbers come from,
+  // and the workout name shows when they come from a different day of the program.
+  function previousHTML(entry, ex, session) {
+    if (!entry) return `<div><strong>Previous:</strong> not done before</div>`;
+    const when = fmtDate(entry.session.date),
+      other = entry.session.name && entry.session.name !== session.name ? ` · ${entry.session.name}` : "";
+    // Line breaks fall between groups, never inside "10 kg × 12".
+    const sets = setsSummaryText(entry.sets, ex)
+      .split(" · ")
+      .map((g) => `<span class="nw">${esc(g)}</span>`)
+      .join(" · ");
+    return `<div class="previous-line"><strong>Previous</strong> <span class="previous-when">(${esc(when + other)})</span>: ${sets}</div>`;
   }
   function suggestLoad(ex, item, prev) {
     if (!prev) return "Choose a conservative load and establish a baseline.";
@@ -4108,7 +4264,7 @@
         issues.length
           ? `<div class="stack health-preview">${issues
               .slice(0, 4)
-              .map((x) => `<div class="health-issue"><strong>${esc(x.title)}</strong><br>${esc(x.text)}</div>`)
+              .map(healthIssueHTML)
               .join("")}</div>`
           : `<div class="health-ok">No structural data problems detected.</div>`
       }<div class="button-grid"><button class="btn ghost" id="exportBtn" type="button">Export backup</button><label class="btn ghost">Import backup<input class="hidden" id="importInput" type="file" accept="application/json,.json"></label><button class="btn ghost span-all" id="healthDetailsBtn" type="button">View integrity report</button></div>${hasUndoCopy() ? `<div class="note-box" style="margin-top:12px">An undo copy from your last import or reset is kept on this device.<div class="wrap" style="margin-top:8px"><button class="btn ghost small-btn" id="undoImportBtn" type="button">Restore previous data</button><button class="btn ghost small-btn" id="discardUndoBtn" type="button">Delete undo copy</button></div></div>` : ""}</section>
@@ -4154,6 +4310,7 @@
     byId("editTargetsBtn").addEventListener("click", openMuscleTargetsModal);
     byId("editBodyFieldsBtn").addEventListener("click", openBodyFieldsModal);
     byId("healthDetailsBtn").addEventListener("click", openDataHealthReport);
+    wireHealthIssues(view);
     byId("exportBtn").addEventListener("click", exportBackup);
     byId("importInput").addEventListener("change", importBackup);
     byId("undoImportBtn")?.addEventListener("click", undoImport);
@@ -4235,6 +4392,17 @@
     downloadText(name, text, "application/json");
     markDone();
   }
+  function healthIssueHTML(x) {
+    return `<div class="health-issue"><strong>${esc(x.title)}</strong><br>${esc(x.text)}${x.sessionId ? `<div class="wrap" style="margin-top:6px"><button class="btn ghost small-btn open-issue-session" data-session="${x.sessionId}" type="button">Open workout to fix</button></div>` : ""}</div>`;
+  }
+  function wireHealthIssues(root) {
+    root.querySelectorAll(".open-issue-session").forEach((b) =>
+      b.addEventListener("click", () => {
+        closeModal();
+        openHistoryRecord(b.dataset.session);
+      }),
+    );
+  }
   function openDataHealthReport() {
     const issues = dataHealthIssues(),
       counts = {
@@ -4251,9 +4419,10 @@
         .map(([k, v]) => `<div class="metric"><span class="meta">${esc(k)}</span><strong>${v}</strong></div>`)
         .join(
           "",
-        )}</div><div class="note-box">Schema v${VERSION}${state.meta.lastMigratedAt ? ` · Last migration ${new Date(state.meta.lastMigratedAt).toLocaleString()}` : ""}${state.meta.lastBackupAt ? ` · Last backup ${new Date(state.meta.lastBackupAt).toLocaleString()}` : " · No backup recorded yet"}</div>${issues.length ? `<div class="stack">${issues.map((x) => `<div class="health-issue"><strong>${esc(x.title)}</strong><br>${esc(x.text)}</div>`).join("")}</div>` : `<div class="health-ok">All current integrity checks passed.</div>`}`,
+        )}</div><div class="note-box">Schema v${VERSION}${state.meta.lastMigratedAt ? ` · Last migration ${new Date(state.meta.lastMigratedAt).toLocaleString()}` : ""}${state.meta.lastBackupAt ? ` · Last backup ${new Date(state.meta.lastBackupAt).toLocaleString()}` : " · No backup recorded yet"}</div>${issues.length ? `<div class="stack">${issues.map(healthIssueHTML).join("")}</div>` : `<div class="health-ok">All current integrity checks passed.</div>`}`,
       `<button class="btn primary" id="healthExportModal" type="button">Export backup</button>`,
     );
+    wireHealthIssues(modalBody);
     byId("healthExportModal").addEventListener("click", () => {
       closeModal();
       exportBackup();
@@ -4263,12 +4432,51 @@
   function dayText(d) {
     return /^\d{4}-\d{2}-\d{2}$/.test(d || "") ? fmtDate(d, { month: "short", day: "numeric", year: "numeric" }) : String(d || "an unknown date");
   }
+  // Logged sets far outside what you usually do on that exercise: most likely typos ("2220 kg", "1012 reps").
+  // One entry per exercise per workout, newest first, each with the workout to open and fix.
+  function likelyTypos() {
+    const out = [];
+    historyIndex().byExercise.forEach((list, exId) => {
+      const ex = getExercise(exId) || list[0]?.item.exerciseSnapshot;
+      if (!ex) return;
+      const done = list.filter((e) => e.sets.length);
+      if (done.length < 3) return; // too little history to know what's usual
+      const field = isDurationBased(ex) ? "durationSec" : isRepBased(ex) ? "reps" : null;
+      done.forEach((e, i) => {
+        // Compared with the workouts around it (up to 4 before and 4 after), so months of progress don't look like a typo.
+        const near = done.slice(Math.max(0, i - 4), i).concat(done.slice(i + 1, i + 5));
+        const refLoad = usesLoad(ex) ? typicalTop(near, "loadKg") : 0,
+          refAmt = field ? typicalTop(near, field) : 0;
+        const oddLoad = (st) => refLoad > 0 && num(st.loadKg) > 0 && unlikelyLoad(num(st.loadKg), refLoad),
+          oddAmt = (st) => refAmt > 0 && unlikelyAmount(num(st[field]), refAmt, field, 0);
+        const odd = e.sets.filter((st) => oddLoad(st) || oddAmt(st));
+        if (!odd.length) return;
+        const usual = [
+          odd.some(oddLoad) ? `${unitWeight(refLoad)} ${weightUnit()}` : "",
+          odd.some(oddAmt) ? `${refAmt}${field === "reps" ? " reps" : " s"}` : "",
+        ]
+          .filter(Boolean)
+          .join(" and ");
+        out.push({
+          title: "Possible typo",
+          text: `${ex.name} on ${dayText(e.session.date)}: ${setsSummaryText(odd, ex)}. You usually do about ${usual}.`,
+          sessionId: e.session.id,
+          setIds: odd.map((st) => st.id),
+          date: e.session.date,
+        });
+      });
+    });
+    return out.sort((a, b) => b.date.localeCompare(a.date));
+  }
   function dataHealthIssues() {
     const issues = [],
       sessionIds = new Set(),
       goalIds = new Set(),
       bodyIds = new Set(),
       bodyDates = new Map();
+    const typos = likelyTypos(),
+      typoSets = new Set(typos.flatMap((x) => x.setIds));
+    issues.push(...typos);
     if (Number(state.version) !== VERSION)
       issues.push({
         title: "Schema version mismatch",
@@ -4310,7 +4518,7 @@
               title: "Negative set value",
               text: `${dayText(s.date)} contains a negative load, rep, duration, or distance value.`,
             });
-          if (st.loadKg > 1000)
+          if (st.loadKg > 1000 && !typoSets.has(st.id))
             issues.push({
               title: "Unusually high load",
               text: `${dayText(s.date)} contains ${round1(st.loadKg)} kg. Verify this entry.`,

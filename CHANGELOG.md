@@ -1,3 +1,17 @@
+## v2.13.1 — "Previous" shows what you really did
+
+Fixes
+- **Typing over a pre-filled number no longer adds to it.** Tapping into a weight or reps box put the cursor next to the old number, so typing "22" over "20" could log "2220" kg (or "1012" reps). That number then became "Previous" and was pre-filled into every later workout. Tapping a box now selects its number, so whatever you type replaces it.
+- **The "Previous" summary lists each set as you did it**, sets at the same weight grouped: "6 kg × 20 · 8 kg × 15 · 10 kg × 12". It used to put the heaviest weight next to every set's reps ("10 kg · 20 / 15 / 12"), as if all sets were done at that weight.
+- It also says which workout the numbers come from, with the date, and the workout's name when it was a different day of your program: "Previous (Thu, Oct 1 · Chest + Triceps)". Lateral raises, incline press, overhead triceps and leg curls are on two days, so their previous numbers can come from the other day.
+- **An exercise skipped last time no longer loses its previous numbers.** "Previous" and the pre-filled sets now come from the last workout where you actually ticked a set of it, instead of showing nothing.
+- **The Previous button keeps the sets you've already ticked.** It used to un-tick them and overwrite them with last time's numbers; now it only fills in the sets you haven't done yet.
+- A comma works as the decimal mark ("22,5" logs 22.5 kg). The reps and RIR boxes open the number pad without a decimal point.
+
+Typo check
+- When you tick a set that's far outside what you usually do on that exercise (more than twice your usual weight, or about three times your usual reps), the app asks before logging it. Cancel leaves the set open so you can fix it. Changing a number on a set you already logged gets the same check. Normal progress never triggers it.
+- More → Data health lists **Possible typo** for sets already in your history that look like this, newest first, each with *Open workout to fix*. Open it, tap *Edit workout*, correct the number and save.
+
 ## v2.13.0 — A fuller exercise library
 
 Exercise library

@@ -552,6 +552,10 @@ textarea {
   background: #f9fafb;
   font-size: 12px;
 }
+.previous-when {
+  color: var(--muted);
+  font-weight: 600;
+}
 .set-head,
 .set-row {
   display: grid;
