@@ -3025,3 +3025,48 @@ html[data-theme="dark"] .focus-box .meta {
   vertical-align: 1px;
   white-space: nowrap;
 }
+
+/* v2.14: kg / lb per exercise. The weight heading is the switch; lb is amber so it can't be mistaken for kg. */
+.set-head .unit-toggle {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 3px;
+  width: 100%;
+  min-width: 0;
+  min-height: 30px;
+  padding: 2px 4px;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  background: var(--card);
+  color: var(--accent);
+  font: inherit;
+  font-size: 11px;
+  font-weight: 850;
+  text-transform: uppercase;
+  letter-spacing: 0.02em;
+  white-space: nowrap;
+  cursor: pointer;
+}
+.set-head .unit-toggle .unit-swap {
+  font-size: 12px;
+  line-height: 1;
+}
+.set-head .unit-toggle.is-lb {
+  background: var(--warn-soft);
+  border-color: var(--warn);
+  color: #92400e;
+}
+html[data-theme="dark"] .set-head .unit-toggle.is-lb {
+  color: var(--warn);
+}
+/* The "Linked with …" line on a superset was dark blue on the dark card. */
+html[data-theme="dark"] .superset-link {
+  color: #7dd3fc;
+}
+.exercise-card.unit-lb .set-load {
+  border-color: var(--warn);
+}
+.exercise-card.unit-lb .set-load:focus {
+  outline-color: var(--warn);
+}
