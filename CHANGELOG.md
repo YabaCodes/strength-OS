@@ -1,3 +1,15 @@
+## v2.15.0 — A more realistic body map
+
+Progress → Muscles
+- **The body map is redrawn as a real body**: neck, sloping shoulders, a tapered waist, hips, knees, hands and feet, instead of boxes.
+- **Muscles have their real shapes**: round shoulder caps (front and side), a chest that curves under, separate ab blocks, three-part quads with the teardrop above the knee, two-part hamstrings, both calf heads, the lats as a wing and the lower back as two columns beside the spine. The traps now also show on the front, over the shoulders. Parts the app doesn't track (neck, shins, hips, the side of the ribs) stay in the body colour so the figure looks complete.
+- Each muscle has soft shading, faint lines showing the direction of its fibres, and thin gaps between neighbouring muscles, like an anatomy chart.
+- The figures are bigger: the boxed panels are gone, so front and back each fill half the card.
+- **A labelled colour key: None, Started, Close, On target, Over.** The colours now follow your target range: started is under half your minimum, close is from half your minimum up to it, on target is within the range, over is above the maximum. Before, they were bands around the minimum only, so a muscle inside its range could show as the top colour.
+- The note under the map says the right thing in each theme ("brighter" in dark, "darker" in light). It used to say "darker" in both.
+- **Tap a muscle** to outline it and dim the rest. Its details show under the figures: effective sets against your target (with the target shaded on a bar), what counted this week, and what your next planned workout this week adds (for example "Thursday's Chest + Triceps adds about 8"). *Details* opens the full pop-up with the 8-week trend; tap the muscle again or *Close* to hide it. Works with the keyboard and VoiceOver too.
+- The muscle list under the map still opens the full pop-up, as before.
+
 ## v2.14.0 — kg or lb per exercise, and "Previous" you can trust
 
 kg or lb per exercise
