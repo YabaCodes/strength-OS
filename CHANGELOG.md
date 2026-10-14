@@ -1,3 +1,30 @@
+## v2.14.0 — kg or lb per exercise, and "Previous" you can trust
+
+kg or lb per exercise
+- Each exercise now has its own weight unit. In a gym where some machines are marked in lb and the dumbbells in kg, log each in its own unit: no more converting in your head.
+- **Tap the weight heading** (KG ⇄) on an exercise in a workout to switch it to lb (or back). It's remembered, so next time that exercise opens in lb. It can also be set in the exercise's edit form (*Weight unit*: App setting, kg or lb).
+- An exercise in lb is easy to spot: its heading is amber and its weight boxes are outlined in amber.
+- Everything about that exercise uses its unit: the boxes you type in, "Previous", the suggestion, PRs, its history and analytics, and goals for it. The suggestion steps up in real plate sizes: 50 lb → "Try 55 lb", not "5.5 lb more".
+- Weights are still saved in kg behind the scenes, so totals, muscle stats and PRs stay comparable, and switching never changes your history: it only changes how it's shown.
+- Switched right after typing a number? The app asks whether that number was in the new unit ("50 → 50 lb") or should be converted ("50 kg → 110.2 lb").
+- **Fix lb typed into kg boxes:** in a workout (also an old one opened from History → *Edit workout*), tap ••• on the exercise → *Weights here were typed in lb*. The numbers stay, their unit changes (100 "kg" becomes 100 lb = 45.4 kg), only for that exercise in that workout. It then offers to log that exercise in lb from now on.
+- The typo check and Data health point this out: a weight about 2.2 times your usual is flagged as "Looks like lb typed as kg".
+
+"Previous" fixes (from the v2.13.1 work)
+- **Typing over a pre-filled number no longer adds to it.** Tapping into a weight or reps box put the cursor next to the old number, so typing "22" over "20" could log "2220" kg (or "1012" reps), which then became "Previous" and was pre-filled into every later workout. Tapping a box now selects its number, so whatever you type replaces it.
+- **The "Previous" summary lists each set as you did it**, sets at the same weight grouped: "6 kg × 20 · 8 kg × 15 · 10 kg × 12". It used to put the heaviest weight next to every set's reps, as if all sets were done at that weight.
+- It says which workout the numbers come from, with the date, and the workout's name when it was a different day of your program: "Previous (Thu, Oct 1 · Chest + Triceps)". Lateral raises, incline press, overhead triceps and leg curls are on two days, so their previous numbers can come from the other day.
+- **An exercise skipped last time keeps its previous numbers.** "Previous" and the pre-filled sets come from the last workout where you actually ticked a set of it, instead of showing nothing.
+- **The Previous button keeps the sets you've already ticked.** It used to un-tick them and overwrite them with last time's numbers.
+- A comma works as the decimal mark ("22,5" logs 22.5). The reps and RIR boxes open the number pad without a decimal point.
+
+Typo check
+- Ticking a set far outside what you usually do on that exercise (more than twice your usual weight, or about three times your usual reps) asks before logging it. Cancel leaves the set open to fix. Changing a number on a logged set gets the same check.
+- More → Data health lists **Possible typo** for sets already in your history that look like this, newest first, each with *Open workout to fix*.
+
+Also
+- In dark mode, the "Linked with …" line on a superset exercise is readable again.
+
 ## v2.13.0 — A fuller exercise library
 
 Exercise library

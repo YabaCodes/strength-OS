@@ -23,7 +23,7 @@
     DB_STORE = "kv";
   const PRE_UPGRADE_DAYS = 30;
   const VERSION = 3;
-  const APP_VERSION = "2.13.0"; // Bump together with VERSION in sw.js.
+  const APP_VERSION = "2.14.0"; // Bump together with VERSION in sw.js.
   const trackingTypes = [
     ["weight_reps", "Weight + reps"],
     ["bodyweight_reps", "Bodyweight + reps"],
@@ -107,6 +107,7 @@
   let wakeLock = null,
     audioCtx = null;
   let indexCache = null; // see historyIndex()
+  const typedLoads = new Set(); // sets whose weight you typed while the app was open (not pre-filled)
 
   // Listeners that must be in place before saved data finishes loading, so these one-off events aren't missed.
   function early() {
@@ -911,10 +912,29 @@
     return state.settings.units === "lb" ? round1(kg * 2.2046226218) : round1(kg);
   }
   function toKg(display) {
-    return state.settings.units === "lb" ? num(display) / 2.2046226218 : num(display);
+    return state.settings.units === "lb" ? numIn(display) / 2.2046226218 : numIn(display);
   }
   function weightUnit() {
     return state.settings.units;
+  }
+  // Each exercise can have its own unit (a machine marked in lb in a kg gym). Weights are always saved in kg;
+  // the unit only changes how they're shown and typed, so history, PRs and stats stay comparable.
+  const LB = 2.2046226218;
+  function exUnit(ex) {
+    return ex?.unit === "kg" || ex?.unit === "lb" ? ex.unit : weightUnit();
+  }
+  function kgIn(unit, kg) {
+    return unit === "lb" ? round1(num(kg) * LB) : round1(num(kg));
+  }
+  function exWeight(ex, kg) {
+    return kgIn(exUnit(ex), kg);
+  }
+  function exToKg(ex, display) {
+    return exUnit(ex) === "lb" ? numIn(display) / LB : numIn(display);
+  }
+  // "22.5 kg" / "50 lb" in the exercise's unit.
+  function exW(ex, kg) {
+    return `${exWeight(ex, kg)} ${exUnit(ex)}`;
   }
   function muscleName(id) {
     return SEED.muscles.find((m) => m.id === id)?.name || id || "Unknown";
@@ -986,17 +1006,18 @@
   function allWorkingSets(item) {
     return (item.sets || []).filter((s) => s.type !== "warmup");
   }
-  function previousExerciseSession(exerciseId, beforeDate, excludeSessionId = null) {
+  // The last time this exercise was actually done: a workout where it was skipped (no ticked sets) is passed
+  // over, so "Previous" and the pre-filled sets come from real numbers instead of going blank.
+  function previousExerciseEntry(exerciseId, beforeDate, excludeSessionId = null) {
     const list = exerciseEntries(exerciseId);
     for (let i = list.length - 1; i >= 0; i--) {
-      const s = list[i].session;
-      if (s.id !== excludeSessionId && s.date <= beforeDate) return s;
+      const e = list[i];
+      if (e.session.id !== excludeSessionId && e.session.date <= beforeDate && e.sets.length) return e;
     }
     return null;
   }
   function previousExerciseItem(exerciseId, beforeDate, excludeSessionId = null) {
-    const s = previousExerciseSession(exerciseId, beforeDate, excludeSessionId);
-    return s?.items.find((i) => i.exerciseId === exerciseId) || null;
+    return previousExerciseEntry(exerciseId, beforeDate, excludeSessionId)?.item || null;
   }
   function e1rm(loadKg, reps) {
     if (loadKg <= 0 || reps <= 0 || reps > 20) return 0;
@@ -1012,6 +1033,70 @@
   }
   function isDurationBased(ex) {
     return ["duration", "weight_duration"].includes(ex.trackingType);
+  }
+  function usesLoad(ex) {
+    return !["reps_only", "bodyweight_reps", "duration"].includes(ex.trackingType);
+  }
+  // A number typed into a set. Accepts a comma as the decimal mark ("22,5"), as some phone keyboards type it.
+  function numIn(v) {
+    return num(String(v ?? "").trim().replace(",", "."));
+  }
+  // What you usually do on an exercise: the middle of each workout's best (load, reps or seconds), taking the lower
+  // of the two middle values. A median, so a typo or two in the history doesn't make the next typo look normal.
+  function typicalTop(entries, field) {
+    const tops = entries
+      .map((e) => Math.max(0, ...e.sets.map((s) => num(s[field]))))
+      .filter((v) => v > 0)
+      .sort((a, b) => a - b);
+    return tops.length ? tops[(tops.length - 1) >> 1] : 0;
+  }
+  // Numbers like "2220" (tapping into "20" and typing "22") or "1012" reps are almost always typos.
+  function unlikelyLoad(load, ref) {
+    return ref > 0 ? load > ref * 2 && load - ref >= 10 : load > 400;
+  }
+  function unlikelyAmount(v, ref, field, targetMax) {
+    const limit = ref > 0 ? Math.max(ref * 3, ref + (field === "reps" ? 20 : 120)) : Math.max(targetMax * 3, field === "reps" ? 50 : 600);
+    return v > limit;
+  }
+  // Before a set is logged: is it far outside what you usually do on this exercise?
+  // Returns { text, field: "load" | "amount" }, or null when it looks fine.
+  function unlikelySet(session, item, ex, st) {
+    if (st.type === "warmup") return null;
+    const entries = exerciseEntries(item.exerciseId)
+      .filter((e) => e.session.id !== session.id && e.session.date <= session.date && e.sets.length)
+      .slice(-6);
+    // A value you already confirmed on an earlier set of this workout isn't asked about again.
+    const today = item.sets.filter((x) => x !== st && x.complete && x.type !== "warmup");
+    const load = num(st.loadKg);
+    if (usesLoad(ex) && load > 0 && !today.some((x) => num(x.loadKg) >= load)) {
+      const ref = typicalTop(entries, "loadKg");
+      if (unlikelyLoad(load, ref))
+        return {
+          field: "load",
+          text:
+            (ref
+              ? `${ex.name}: ${exW(ex, load)} is more than twice what you usually do (about ${exW(ex, ref)}).`
+              : `${ex.name}: ${exW(ex, load)} is very heavy.`) +
+            // Pounds typed into a kg box come out about 2.2 times too heavy.
+            (exUnit(ex) === "kg" && ref && load / ref > 1.9 && load / ref < 2.6
+              ? ` If this machine is in lb, tap the KG heading to switch ${ex.name} to lb.`
+              : ""),
+        };
+    }
+    const field = isDurationBased(ex) ? "durationSec" : isRepBased(ex) ? "reps" : null;
+    const v = field ? num(st[field]) : 0;
+    if (field && v > 0 && !today.some((x) => num(x[field]) >= v)) {
+      const ref = typicalTop(entries, field);
+      if (unlikelyAmount(v, ref, field, num(item.target?.max || ex.defaultMax)))
+        return {
+          field: "amount",
+          text:
+            field === "reps"
+              ? `${ex.name}: ${v} reps is far more than usual${ref ? ` (about ${ref})` : ""}.`
+              : `${ex.name}: ${v} s is far longer than usual${ref ? ` (about ${ref} s)` : ""}.`,
+        };
+    }
+    return null;
   }
 
   function navigate(v) {
@@ -1445,7 +1530,8 @@
     if (collapsed) {
       return `<section class="card exercise-card collapsed ${item.supersetGroup ? "superset-card" : ""}" id="exercise_${item.id}"><button class="exercise-collapsed-btn toggle-item" data-item="${item.id}" type="button" aria-expanded="false"><span class="exercise-collapsed-check" aria-hidden="true">✓</span><span class="exercise-collapsed-text"><strong>${esc(ex.name)}</strong><span class="meta">${workingSets(item).map((st) => setSummary(st, ex)).join(" · ")}</span></span>${prPill}<span class="row-chevron" aria-hidden="true">›</span></button></section>`;
     }
-    const prev = previousExerciseItem(item.exerciseId, addDays(session.date, -1), session.id);
+    const prevEntry = previousExerciseEntry(item.exerciseId, addDays(session.date, -1), session.id),
+      prev = prevEntry?.item || null;
     const suggestion = suggestLoad(ex, item, prev);
     const supNames = item.supersetGroup
       ? session.items
@@ -1453,21 +1539,28 @@
           .map((x) => (getExercise(x.exerciseId) || x.exerciseSnapshot).name)
       : [];
     const canFold = itemComplete(item);
-    return `<section class="card exercise-card ${item.supersetGroup ? "superset-card" : ""}" id="exercise_${item.id}"><div class="exercise-top"><div class="row start"><div><div class="wrap"><h3>${nameHTML(ex.name)}</h3><span class="pill priority-pill">${esc(item.target?.priority || "B")}</span>${sup}${prPill}</div>${focusHTML(ex)}<div class="target">${item.target?.sets || sets.length} × ${item.target?.min || ex.defaultMin}–${item.target?.max || ex.defaultMax} · ${restText(item.target?.rest || ex.defaultRest || 90)} rest</div><div class="meta">${muscleName(ex.primaryMuscle)} · ${esc(ex.equipment || "")} · ${trackingLabel(ex.trackingType)}</div>${supNames.length ? `<div class="meta superset-link">Linked with ${supNames.map(esc).join(" + ")}</div>` : ""}</div><div class="exercise-top-actions">${canFold ? `<button class="icon-btn toggle-item" data-item="${item.id}" type="button" aria-expanded="true" aria-label="Fold ${esc(ex.name)}">⌃</button>` : ""}<button class="icon-btn exercise-menu" data-item="${item.id}" type="button" aria-label="Options for ${esc(ex.name)}">•••</button></div></div></div><div class="exercise-body">
+    return `<section class="card exercise-card ${item.supersetGroup ? "superset-card" : ""} ${usesLoad(ex) && exUnit(ex) === "lb" ? "unit-lb" : ""}" id="exercise_${item.id}"><div class="exercise-top"><div class="row start"><div><div class="wrap"><h3>${nameHTML(ex.name)}</h3><span class="pill priority-pill">${esc(item.target?.priority || "B")}</span>${sup}${prPill}</div>${focusHTML(ex)}<div class="target">${item.target?.sets || sets.length} × ${item.target?.min || ex.defaultMin}–${item.target?.max || ex.defaultMax} · ${restText(item.target?.rest || ex.defaultRest || 90)} rest</div><div class="meta">${muscleName(ex.primaryMuscle)} · ${esc(ex.equipment || "")} · ${trackingLabel(ex.trackingType)}</div>${supNames.length ? `<div class="meta superset-link">Linked with ${supNames.map(esc).join(" + ")}</div>` : ""}</div><div class="exercise-top-actions">${canFold ? `<button class="icon-btn toggle-item" data-item="${item.id}" type="button" aria-expanded="true" aria-label="Fold ${esc(ex.name)}">⌃</button>` : ""}<button class="icon-btn exercise-menu" data-item="${item.id}" type="button" aria-label="Options for ${esc(ex.name)}">•••</button></div></div></div><div class="exercise-body">
       ${ex.notes ? `<div class="note-box"><strong>Exercise note:</strong> ${esc(ex.notes)}</div>` : ""}
-      <div class="previous"><div><strong>Previous:</strong> ${previousText(prev, ex)}</div><div><strong>Suggested:</strong> ${esc(suggestion)}</div></div>
-      <div class="set-head" aria-hidden="true"><span>Set</span><span>Type</span><span>${loadHeader(ex)}</span><span>${repHeader(ex)}</span><span>${state.settings.trackRir ? "RIR" : ""}</span><span>Done</span></div>
+      <div class="previous">${previousHTML(prevEntry, ex, session)}<div><strong>Suggested:</strong> ${esc(suggestion)}</div></div>
+      <div class="set-head"><span aria-hidden="true">Set</span><span aria-hidden="true">Type</span>${unitHeaderHTML(item, ex)}<span aria-hidden="true">${repHeader(ex)}</span><span aria-hidden="true">${state.settings.trackRir ? "RIR" : ""}</span><span aria-hidden="true">Done</span></div>
       <div id="sets_${item.id}">${sets.map((st, i) => liveSetRow(session, item, ex, st, i, prev)).join("")}</div>
       <div class="exercise-actions"><button class="btn ghost small-btn use-prev" data-item="${item.id}" type="button" aria-label="Use previous values">Previous</button><button class="btn ghost small-btn add-set" data-item="${item.id}" type="button">+ Set</button><button class="btn ghost small-btn add-warmup" data-item="${item.id}" type="button">+ Warm-up</button><button class="btn ghost small-btn remove-last-set" data-item="${item.id}" type="button">− Set</button><button class="btn ghost small-btn rest-now" data-item="${item.id}" type="button">Rest</button></div>
       <div class="exercise-flags"><label class="check-chip compact-chip"><input class="tech-good" data-item="${item.id}" type="checkbox" ${item.techniqueGood !== false ? "checked" : ""}><span>Technique good</span></label><label class="pain-inline"><span>Pain</span><select class="pain-select" data-item="${item.id}" aria-label="Pain or discomfort"><option value="none" ${item.pain === "none" ? "selected" : ""}>None</option><option value="mild" ${item.pain === "mild" ? "selected" : ""}>Mild</option><option value="stop" ${item.pain === "stop" ? "selected" : ""}>Stop exercise</option></select></label></div>
       ${item.notes ? `<div class="note-box"><strong>Session note:</strong> ${esc(item.notes)}</div>` : ""}
     </div></section>`;
   }
+  // The weight column heading doubles as the kg/lb switch for that exercise (remembered for next time).
+  function unitHeaderHTML(item, ex) {
+    if (!usesLoad(ex) || !getExercise(item.exerciseId)) return `<span aria-hidden="true">${esc(loadHeader(ex))}</span>`;
+    const u = exUnit(ex),
+      other = u === "kg" ? "lb" : "kg";
+    return `<button class="unit-toggle ${u === "lb" ? "is-lb" : ""}" data-item="${item.id}" type="button" aria-label="${esc(ex.name)} weights are in ${u}. Switch to ${other}."><span>${esc(loadHeader(ex))}</span><span class="unit-swap" aria-hidden="true">⇄</span></button>`;
+  }
   function loadHeader(ex) {
     if (["reps_only", "bodyweight_reps", "duration"].includes(ex.trackingType)) return "Load";
-    if (ex.trackingType === "assisted_bodyweight") return `Assist ${weightUnit()}`;
-    if (ex.trackingType === "bodyweight_added") return `+${weightUnit()}`;
-    return weightUnit();
+    if (ex.trackingType === "assisted_bodyweight") return `Assist ${exUnit(ex)}`;
+    if (ex.trackingType === "bodyweight_added") return `+${exUnit(ex)}`;
+    return exUnit(ex);
   }
   function repHeader(ex) {
     if (isDurationBased(ex)) return "Sec";
@@ -1484,7 +1577,7 @@
     if (!prevSet) return "Previous —";
     const load =
       prevSet.loadKg > 0
-        ? `${unitWeight(prevSet.loadKg)} ${weightUnit()}`
+        ? exW(ex, prevSet.loadKg)
         : ex.trackingType.includes("bodyweight")
           ? "BW"
           : "—";
@@ -1509,23 +1602,27 @@
       : ex.trackingType === "distance_duration"
         ? s.distanceKm
         : s.reps;
-    const loadShown = s.loadKg ? unitWeight(s.loadKg) : "";
+    const loadShown = s.loadKg ? exWeight(ex, s.loadKg) : "";
     const ord = workingOrdinal(item.sets, i);
     const prevSet = ord >= 0 ? workingSets(prev || { sets: [] })[ord] : null;
     const prs = instantSetPRs(session, item, s);
     const setName = s.type === "warmup" ? "Warm-up set" : `Set ${ord + 1}`;
-    return `<div class="set-entry ${s.complete ? "complete" : ""}" data-set-entry="${s.id}"><div class="set-row" data-set="${s.id}"><span class="set-num" aria-hidden="true">${s.type === "warmup" ? "W" : ord + 1}</span><select class="set-type" data-set="${s.id}" aria-label="${setName} type">${setTypes.map(([v, l]) => `<option value="${v}" ${s.type === v ? "selected" : ""}>${l}</option>`).join("")}</select><input class="set-load" data-set="${s.id}" inputmode="decimal" type="number" step="0.5" min="0" value="${esc(loadShown)}" placeholder="${["reps_only", "bodyweight_reps", "duration"].includes(ex.trackingType) ? "—" : weightUnit()}" aria-label="${setName} ${esc(loadHeader(ex))}"><input class="set-reps" data-set="${s.id}" inputmode="decimal" type="number" step="${ex.trackingType === "distance_duration" ? "0.1" : "1"}" min="0" value="${second || ""}" placeholder="${repHeader(ex)}" aria-label="${setName} ${repHeader(ex).toLowerCase()}"><input class="set-rir" data-set="${s.id}" inputmode="numeric" type="number" min="0" max="5" step="1" value="${s.rir ?? ""}" aria-label="${setName} reps in reserve" ${state.settings.trackRir && s.type !== "warmup" ? "" : "disabled"}><button class="done-btn ${s.complete ? "done" : ""}" data-set="${s.id}" type="button" aria-pressed="${s.complete ? "true" : "false"}" aria-label="${s.complete ? "Reopen" : "Complete"} ${setName.toLowerCase()}">✓</button></div>${s.type !== "warmup" ? `<div class="set-prev-line"><span>${esc(previousSetCompact(ex, prevSet))}</span>${prs.length ? `<span class="pr-inline">★ ${prs.join(" + ")}</span>` : ""}</div>` : ""}</div>`;
+    return `<div class="set-entry ${s.complete ? "complete" : ""}" data-set-entry="${s.id}"><div class="set-row" data-set="${s.id}"><span class="set-num" aria-hidden="true">${s.type === "warmup" ? "W" : ord + 1}</span><select class="set-type" data-set="${s.id}" aria-label="${setName} type">${setTypes.map(([v, l]) => `<option value="${v}" ${s.type === v ? "selected" : ""}>${l}</option>`).join("")}</select><input class="set-load" data-set="${s.id}" type="text" inputmode="decimal" autocomplete="off" autocorrect="off" spellcheck="false" value="${esc(loadShown)}" placeholder="${usesLoad(ex) ? exUnit(ex) : "—"}" aria-label="${setName} ${esc(loadHeader(ex))}"><input class="set-reps" data-set="${s.id}" type="text" inputmode="${ex.trackingType === "distance_duration" ? "decimal" : "numeric"}" autocomplete="off" autocorrect="off" spellcheck="false" value="${second || ""}" placeholder="${repHeader(ex)}" aria-label="${setName} ${repHeader(ex).toLowerCase()}"><input class="set-rir" data-set="${s.id}" type="text" inputmode="numeric" autocomplete="off" autocorrect="off" spellcheck="false" maxlength="1" value="${s.rir ?? ""}" aria-label="${setName} reps in reserve" ${state.settings.trackRir && s.type !== "warmup" ? "" : "disabled"}><button class="done-btn ${s.complete ? "done" : ""}" data-set="${s.id}" type="button" aria-pressed="${s.complete ? "true" : "false"}" aria-label="${s.complete ? "Reopen" : "Complete"} ${setName.toLowerCase()}">✓</button></div>${s.type !== "warmup" ? `<div class="set-prev-line"><span>${esc(previousSetCompact(ex, prevSet))}</span>${prs.length ? `<span class="pr-inline">★ ${prs.join(" + ")}</span>` : ""}</div>` : ""}</div>`;
   }
 
-  function prefillSessionItem(item, date, excludeSessionId = null) {
+  // keepDone: leave sets you've already ticked in this workout as they are (the "Previous" button).
+  function prefillSessionItem(item, date, excludeSessionId = null, keepDone = false) {
     const ex = getExercise(item.exerciseId) || item.exerciseSnapshot;
     const prev = previousExerciseItem(item.exerciseId, addDays(date, -1), excludeSessionId);
-    if (!prev) return item;
+    if (!prev) return 0;
     const prior = workingSets(prev),
       current = allWorkingSets(item);
+    let filled = 0;
     current.forEach((st, i) => {
       const p = prior[i];
-      if (!p) return;
+      if (!p || (keepDone && st.complete)) return;
+      filled++;
+      typedLoads.delete(st.id);
       if (!["reps_only", "bodyweight_reps", "duration"].includes(ex.trackingType)) st.loadKg = p.loadKg || 0;
       if (isDurationBased(ex)) st.durationSec = p.durationSec || 0;
       else if (ex.trackingType === "distance_duration") st.distanceKm = p.distanceKm || 0;
@@ -1533,7 +1630,41 @@
       st.rir = null;
       st.complete = false;
     });
-    return item;
+    return filled;
+  }
+
+  // Tapping into a filled-in number selects it, so typing replaces it. Otherwise the cursor lands next to the
+  // old number and "20" then "22" becomes "2220", which then gets logged and pre-filled into every later workout.
+  function selectOnFocus(el) {
+    let fresh = false,
+      start = "";
+    const all = () => {
+      // Once you've started typing, leave the field alone.
+      if (document.activeElement !== el || el.value !== start) return;
+      try {
+        el.setSelectionRange(0, el.value.length);
+      } catch {
+        try {
+          el.select();
+        } catch {}
+      }
+    };
+    el.addEventListener("focus", () => {
+      fresh = true;
+      start = el.value;
+      all();
+      setTimeout(all, 0);
+    });
+    // The tap that focused the field would otherwise drop the cursor where the finger was, undoing the selection.
+    // Only that first tap: tapping again places the cursor as usual.
+    el.addEventListener("mouseup", (e) => {
+      if (!fresh) return;
+      fresh = false;
+      e.preventDefault();
+      all();
+    });
+    el.addEventListener("input", () => (fresh = false));
+    el.addEventListener("blur", () => (fresh = false));
   }
 
   function wireLiveExercise(session, item, idx) {
@@ -1560,6 +1691,11 @@
       }
     };
     const rerender = (anchor) => refreshLive(session, [item.id, previousTouched], anchor || `#exercise_${item.id}`);
+    const setAmount = (st, v) => {
+      if (isDurationBased(ex)) st.durationSec = Math.max(0, numIn(v));
+      else if (ex.trackingType === "distance_duration") st.distanceKm = Math.max(0, numIn(v));
+      else st.reps = Math.max(0, numIn(v));
+    };
     // Read the inputs of a set row straight from the screen, in case iOS hasn't fired "change" yet.
     const syncRow = (st) => {
       const row = root.querySelector(`.set-row[data-set="${st.id}"]`);
@@ -1567,14 +1703,55 @@
       const load = row.querySelector(".set-load"),
         reps = row.querySelector(".set-reps"),
         rir = row.querySelector(".set-rir");
-      if (load && load.value !== "") st.loadKg = Math.max(0, toKg(load.value));
-      if (reps && reps.value !== "") {
-        if (isDurationBased(ex)) st.durationSec = Math.max(0, num(reps.value));
-        else if (ex.trackingType === "distance_duration") st.distanceKm = Math.max(0, num(reps.value));
-        else st.reps = Math.max(0, num(reps.value));
+      if (load && load.value.trim() !== "") {
+        if (load.value !== load.defaultValue) typedLoads.add(st.id);
+        st.loadKg = Math.max(0, exToKg(ex, load.value));
       }
-      if (rir && !rir.disabled) st.rir = rir.value === "" ? null : clamp(rir.value, 0, 5);
+      if (reps && reps.value.trim() !== "") setAmount(st, reps.value);
+      if (rir && !rir.disabled) st.rir = rir.value.trim() === "" ? null : clamp(numIn(rir.value), 0, 5);
     };
+    // Changing a number on a set that's already logged gets the same typo check as ticking it.
+    const keepChange = (st, before) => {
+      if (!st.complete) return true;
+      const odd = unlikelySet(session, item, ex, st);
+      if (!odd || confirm(`${odd.text}\n\nKeep it? Cancel puts back what was there.`)) return true;
+      Object.assign(st, before);
+      return false;
+    };
+    root.querySelectorAll(".set-load, .set-reps, .set-rir").forEach(selectOnFocus);
+    card.querySelector(".unit-toggle")?.addEventListener("click", () => {
+      const exObj = getExercise(item.exerciseId);
+      if (!exObj) return;
+      const from = exUnit(exObj),
+        to = from === "kg" ? "lb" : "kg";
+      // A weight still in its box (not saved yet) was typed in the old unit.
+      root.querySelectorAll(".set-load").forEach((box) => {
+        const st = item.sets.find((x) => x.id === box.dataset.set);
+        if (st && box.value !== box.defaultValue && box.value.trim() !== "") {
+          st.loadKg = Math.max(0, exToKg(exObj, box.value));
+          typedLoads.add(st.id);
+        }
+      });
+      const typed = item.sets.filter((st) => typedLoads.has(st.id) && num(st.loadKg) > 0);
+      const apply = (keepNumbers) => {
+        const onScreen = new Map(typed.map((st) => [st.id, kgIn(from, st.loadKg)]));
+        exObj.unit = to;
+        exObj.updatedAt = Date.now();
+        if (keepNumbers) typed.forEach((st) => (st.loadKg = exToKg(exObj, onScreen.get(st.id))));
+        touch();
+        save();
+        renderLiveSession(session, `#exercise_${item.id}`);
+        showToast(`${exObj.name}: weights now in ${to}, here and next time.`);
+      };
+      // Pre-filled and saved weights are real, so they're shown converted. Numbers you just typed are usually
+      // the machine's own numbers in the other unit, so ask.
+      if (!typed.length) return apply(false);
+      const n = kgIn(from, typed[0].loadKg);
+      openActionSheet("Weight unit", `${exObj.name} in ${to}`, [
+        [`My numbers were ${to}: ${n} → ${n} ${to}`, () => apply(true)],
+        [`Convert them: ${n} ${from} → ${kgIn(to, typed[0].loadKg)} ${to}`, () => apply(false)],
+      ]);
+    });
     root.querySelectorAll(".set-type").forEach((el) =>
       el.addEventListener("change", () => {
         const st = item.sets.find((x) => x.id === el.dataset.set);
@@ -1588,7 +1765,10 @@
     root.querySelectorAll(".set-load").forEach((el) =>
       el.addEventListener("change", () => {
         const st = item.sets.find((x) => x.id === el.dataset.set);
-        st.loadKg = Math.max(0, toKg(el.value));
+        const before = { loadKg: st.loadKg };
+        st.loadKg = Math.max(0, exToKg(ex, el.value));
+        if (el.value.trim() !== "") typedLoads.add(st.id);
+        if (!keepChange(st, before)) el.value = st.loadKg ? exWeight(ex, st.loadKg) : "";
         touch();
         save();
       }),
@@ -1596,9 +1776,10 @@
     root.querySelectorAll(".set-reps").forEach((el) =>
       el.addEventListener("change", () => {
         const st = item.sets.find((x) => x.id === el.dataset.set);
-        if (isDurationBased(ex)) st.durationSec = Math.max(0, num(el.value));
-        else if (ex.trackingType === "distance_duration") st.distanceKm = Math.max(0, num(el.value));
-        else st.reps = Math.max(0, num(el.value));
+        const before = { reps: st.reps, durationSec: st.durationSec, distanceKm: st.distanceKm };
+        setAmount(st, el.value);
+        if (!keepChange(st, before))
+          el.value = (isDurationBased(ex) ? st.durationSec : ex.trackingType === "distance_duration" ? st.distanceKm : st.reps) || "";
         touch();
         save();
       }),
@@ -1606,7 +1787,7 @@
     root.querySelectorAll(".set-rir").forEach((el) =>
       el.addEventListener("change", () => {
         const st = item.sets.find((x) => x.id === el.dataset.set);
-        st.rir = el.value === "" ? null : clamp(el.value, 0, 5);
+        st.rir = el.value.trim() === "" ? null : clamp(numIn(el.value), 0, 5);
         touch();
         save();
       }),
@@ -1615,6 +1796,17 @@
       el.addEventListener("click", () => {
         const st = item.sets.find((x) => x.id === el.dataset.set);
         syncRow(st);
+        // A number far outside what you usually do is almost always a typo: ask before it's logged, because
+        // whatever is logged becomes "Previous" and is pre-filled into the next workout.
+        if (!st.complete) {
+          const odd = unlikelySet(session, item, ex, st);
+          if (odd && !confirm(`${odd.text}\n\nLog it anyway? Cancel lets you fix it first.`)) {
+            save();
+            const field = root.querySelector(`.set-row[data-set="${st.id}"] ${odd.field === "load" ? ".set-load" : ".set-reps"}`);
+            field?.focus();
+            return;
+          }
+        }
         st.complete = !st.complete;
         const justCompleted = st.complete;
         touch();
@@ -1636,16 +1828,24 @@
       }),
     );
     card.querySelector(".use-prev").addEventListener("click", () => {
-      prefillSessionItem(item, session.date, session.id);
+      // Only the sets you haven't ticked yet: what you've already logged today stays.
+      const filled = prefillSessionItem(item, session.date, session.id, true);
       touch();
       save();
       rerender();
-      showToast(`${ex.name}: previous values restored.`);
+      showToast(
+        filled
+          ? `${ex.name}: previous values filled in.`
+          : previousExerciseItem(item.exerciseId, addDays(session.date, -1), session.id)
+            ? `${ex.name}: every set with a previous value is already ticked.`
+            : `${ex.name}: no previous workout to copy from yet.`,
+      );
     });
     card.querySelector(".add-set").addEventListener("click", () => {
       const st = newSet("normal");
       const priorCurrent = allWorkingSets(item).at(-1);
       if (priorCurrent) {
+        if (typedLoads.has(priorCurrent.id)) typedLoads.add(st.id);
         st.loadKg = priorCurrent.loadKg || 0;
         st.reps = priorCurrent.reps || 0;
         st.durationSec = priorCurrent.durationSec || 0;
@@ -1703,18 +1903,43 @@
       return !nth || nth.complete;
     });
   }
-  function previousText(prev, ex) {
-    if (!prev) return "No previous logged session";
-    const sets = workingSets(prev);
-    if (!sets.length) return "No completed working sets";
-    const load = sets.map((s) => s.loadKg).filter((v) => v > 0);
-    const loadText = load.length
-      ? `${unitWeight(Math.max(...load))} ${weightUnit()}`
-      : ex.trackingType.includes("bodyweight")
-        ? "Bodyweight"
-        : "—";
-    const reps = sets.map((s) => (isDurationBased(ex) ? `${s.durationSec}s` : s.reps)).join(" / ");
-    return `${loadText} · ${reps}`;
+  // Each set as it was done, sets at the same weight grouped: "20 kg × 12, 10 · 22.5 kg × 8".
+  // (It used to show the heaviest weight next to every set's reps, as if all sets were done at that weight.)
+  function setsSummaryText(sets, ex) {
+    const t = ex.trackingType;
+    const loadOf = (s) => {
+      const w = num(s.loadKg);
+      if (!usesLoad(ex)) return "";
+      if (t === "bodyweight_added") return w > 0 ? `BW + ${exW(ex, w)}` : "BW";
+      if (t === "assisted_bodyweight") return w > 0 ? `${exW(ex, w)} assist` : "BW";
+      return w > 0 ? exW(ex, w) : "";
+    };
+    const amountOf = (s) =>
+      isDurationBased(ex) ? `${num(s.durationSec)} s` : t === "distance_duration" ? `${num(s.distanceKm)} km` : `${num(s.reps)}`;
+    const groups = [];
+    sets.forEach((s) => {
+      const load = loadOf(s),
+        last = groups.at(-1);
+      if (last && last.load === load) last.amounts.push(amountOf(s));
+      else groups.push({ load, amounts: [amountOf(s)] });
+    });
+    const reps = isRepBased(ex) && !isDurationBased(ex);
+    return groups
+      .map((g) => (g.load ? `${g.load} × ${g.amounts.join(", ")}` : `${g.amounts.join(", ")}${reps ? " reps" : ""}`))
+      .join(" · ");
+  }
+  // "Previous (Thu, Oct 8 · Chest + Triceps): 9 kg × 15, 14, 13, 12" — the date says where the numbers come from,
+  // and the workout name shows when they come from a different day of the program.
+  function previousHTML(entry, ex, session) {
+    if (!entry) return `<div><strong>Previous:</strong> not done before</div>`;
+    const when = fmtDate(entry.session.date),
+      other = entry.session.name && entry.session.name !== session.name ? ` · ${entry.session.name}` : "";
+    // Line breaks fall between groups, never inside "10 kg × 12".
+    const sets = setsSummaryText(entry.sets, ex)
+      .split(" · ")
+      .map((g) => `<span class="nw">${esc(g)}</span>`)
+      .join(" · ");
+    return `<div class="previous-line"><strong>Previous</strong> <span class="previous-when">(${esc(when + other)})</span>: ${sets}</div>`;
   }
   function suggestLoad(ex, item, prev) {
     if (!prev) return "Choose a conservative load and establish a baseline.";
@@ -1730,33 +1955,72 @@
         .every((s) => (isDurationBased(ex) ? s.durationSec >= maxRep : s.reps >= maxRep));
     const rirOkay = sets.every((s) => s.rir == null || s.rir >= 1);
     const load = Math.max(0, ...sets.map((s) => s.loadKg || 0));
+    // Steps in the exercise's own unit: a machine in lb goes up 5 lb, not "2.5 kg = 5.5 lb".
+    const u = exUnit(ex),
+      step = loadStep(ex),
+      shown = (kg) => exWeight(ex, kg);
     if (ex.trackingType === "assisted_bodyweight") {
       // Less assistance is progress.
       const assist = Math.min(...sets.map((s) => num(s.loadKg)));
       if (top && rirOkay && assist > 0) {
-        const next = Math.max(0, assist - (num(ex.incrementKg) || 2.5));
-        return next > 0 ? `Try ${unitWeight(next)} ${weightUnit()} of assistance.` : "Try it unassisted.";
+        const next = round1(Math.max(0, shown(assist) - (step || (u === "lb" ? 5 : 2.5))));
+        return next > 0 ? `Try ${next} ${u} of assistance.` : "Try it unassisted.";
       }
-      return assist > 0 ? `Stay at ${unitWeight(assist)} ${weightUnit()} of assistance and add reps.` : "Add reps.";
+      return assist > 0 ? `Stay at ${shown(assist)} ${u} of assistance and add reps.` : "Add reps.";
     }
     if (["bodyweight_reps", "reps_only"].includes(ex.trackingType))
       return top && rirOkay ? "Top of the rep range — add reps or move to a harder variation." : "Add reps.";
-    if (top && rirOkay && num(ex.incrementKg) > 0) {
-      const next = load + num(ex.incrementKg);
-      return ex.trackingType === "bodyweight_added"
-        ? `Try bodyweight + ${unitWeight(next)} ${weightUnit()}.`
-        : `Try ${unitWeight(next)} ${weightUnit()}.`;
+    if (top && rirOkay && step > 0) {
+      const next = round1(shown(load) + step);
+      return ex.trackingType === "bodyweight_added" ? `Try bodyweight + ${next} ${u}.` : `Try ${next} ${u}.`;
     }
-    return load ? `Stay at ${unitWeight(load)} ${weightUnit()} and add reps.` : "Add reps before adding load.";
+    return load ? `Stay at ${shown(load)} ${u} and add reps.` : "Add reps before adding load.";
+  }
+  // The usual jump in load, in the exercise's unit. Increments are saved in kg; in lb they snap to plate sizes.
+  function loadStep(ex) {
+    const kg = num(ex.incrementKg);
+    if (kg <= 0) return 0;
+    if (exUnit(ex) !== "lb") return kg;
+    const lb = kg * LB;
+    return [1, 2.5, 5, 10, 20].reduce((best, x) => (Math.abs(x - lb) < Math.abs(best - lb) ? x : best));
   }
   function openExerciseSessionMenu(session, item, idx) {
     const ex = getExercise(item.exerciseId) || item.exerciseSnapshot;
+    const u = exUnit(ex),
+      other = u === "kg" ? "lb" : "kg",
+      canFixUnit = usesLoad(ex) && item.sets.some((st) => num(st.loadKg) > 0);
     openModal(
       "Exercise options",
       ex.name,
-      `<div class="stack"><button class="btn ghost" id="substituteBtn" type="button">Substitute for this workout</button><button class="btn ghost" id="noteItemBtn" type="button">Add / edit session note</button><label>Superset group<input id="supersetInput" value="${esc(item.supersetGroup || "")}" placeholder="e.g. A"></label><button class="btn ghost" id="saveSupersetBtn" type="button">Save superset group</button><button class="btn danger" id="removeExerciseSessionBtn" type="button">Remove from workout</button></div>`,
+      `<div class="stack">${canFixUnit ? `<button class="btn ghost" id="fixUnitBtn" type="button">Weights here were typed in ${other}</button>` : ""}<button class="btn ghost" id="substituteBtn" type="button">Substitute for this workout</button><button class="btn ghost" id="noteItemBtn" type="button">Add / edit session note</button><label>Superset group<input id="supersetInput" value="${esc(item.supersetGroup || "")}" placeholder="e.g. A"></label><button class="btn ghost" id="saveSupersetBtn" type="button">Save superset group</button><button class="btn danger" id="removeExerciseSessionBtn" type="button">Remove from workout</button></div>`,
       "",
     );
+    // Repair: numbers typed as the wrong unit (e.g. a machine's lb typed into kg boxes). The numbers stay; their
+    // unit changes, so 100 "kg" becomes 100 lb = 45.4 kg. Only this exercise in this workout.
+    byId("fixUnitBtn")?.addEventListener("click", () => {
+      const first = item.sets.find((st) => num(st.loadKg) > 0),
+        typed = exWeight(ex, first.loadKg),
+        asKg = (kg) => (u === "kg" ? num(kg) / LB : num(kg) * LB),
+        n = item.sets.filter((st) => num(st.loadKg) > 0).length;
+      if (
+        !confirm(
+          `${ex.name}, ${fmtDate(session.date)}: were these weights ${other}, not ${u}?\n\n${typed} ${u} becomes ${typed} ${other} (${kgIn(u, asKg(first.loadKg))} ${u}). ${n} set${n === 1 ? "" : "s"} in this workout change; nothing else does.`,
+        )
+      )
+        return;
+      item.sets.forEach((st) => {
+        if (num(st.loadKg) > 0) st.loadKg = asKg(st.loadKg);
+      });
+      const exObj = getExercise(item.exerciseId);
+      if (exObj && confirm(`Log ${ex.name} in ${other} from now on?`)) {
+        exObj.unit = other;
+        exObj.updatedAt = Date.now();
+      }
+      save();
+      closeModal();
+      renderLiveSession(session, `#exercise_${item.id}`);
+      showToast(`${ex.name}: weights in this workout read as ${other}.`);
+    });
     byId("substituteBtn").addEventListener("click", () => {
       closeModal();
       openExercisePicker(
@@ -2506,7 +2770,7 @@
     if (!ex) return;
     const usage = exerciseProgramUsage(ex.id),
       hist = exerciseHistoryUsage(ex.id);
-    modalBody.innerHTML = `<div class="stack">${exFocus(ex) ? `<div class="focus-box"><span class="meta">Targets</span><strong>${esc(exFocus(ex))}</strong></div>` : ""}<div class="note-box"><strong>${muscleName(ex.primaryMuscle)}</strong>${(ex.secondaryMuscles || []).length ? ` · secondary: ${(ex.secondaryMuscles || []).map(muscleName).join(", ")}` : ""}<br>${esc(ex.equipment)} · ${trackingLabel(ex.trackingType)}</div><div class="grid-2"><div class="metric"><span class="meta">Program use</span><strong>${usage.length}</strong><span class="small muted">program days</span></div><div class="metric"><span class="meta">History</span><strong>${hist}</strong><span class="small muted">logged sessions</span></div></div>${ex.notes ? `<div class="note-box"><strong>Exercise note:</strong> ${esc(ex.notes)}</div>` : ""}${usage.length ? `<div><p class="meta" style="font-weight:800">Used in</p><div class="list">${usage.map((u) => `<div class="list-row"><div><strong>${esc(u.day)}</strong><div class="meta">${esc(u.program)}</div></div><span class="pill neutral">${u.count}×</span></div>`).join("")}</div></div>` : ""}<div class="wrap"><button class="btn primary" id="detailEditEx" type="button">Edit</button><button class="btn ghost" id="detailDuplicateEx" type="button">Duplicate</button><button class="btn ghost" id="detailArchiveEx" type="button">${ex.archived ? "Restore" : "Archive"}</button>${!ex.builtIn ? `<button class="btn danger" id="detailDeleteEx" type="button">Delete</button>` : ""}</div></div>`;
+    modalBody.innerHTML = `<div class="stack">${exFocus(ex) ? `<div class="focus-box"><span class="meta">Targets</span><strong>${esc(exFocus(ex))}</strong></div>` : ""}<div class="note-box"><strong>${muscleName(ex.primaryMuscle)}</strong>${(ex.secondaryMuscles || []).length ? ` · secondary: ${(ex.secondaryMuscles || []).map(muscleName).join(", ")}` : ""}<br>${esc(ex.equipment)} · ${trackingLabel(ex.trackingType)}${usesLoad(ex) ? ` · weights in ${exUnit(ex)}${ex.unit ? "" : " (app setting)"}` : ""}</div><div class="grid-2"><div class="metric"><span class="meta">Program use</span><strong>${usage.length}</strong><span class="small muted">program days</span></div><div class="metric"><span class="meta">History</span><strong>${hist}</strong><span class="small muted">logged sessions</span></div></div>${ex.notes ? `<div class="note-box"><strong>Exercise note:</strong> ${esc(ex.notes)}</div>` : ""}${usage.length ? `<div><p class="meta" style="font-weight:800">Used in</p><div class="list">${usage.map((u) => `<div class="list-row"><div><strong>${esc(u.day)}</strong><div class="meta">${esc(u.program)}</div></div><span class="pill neutral">${u.count}×</span></div>`).join("")}</div></div>` : ""}<div class="wrap"><button class="btn primary" id="detailEditEx" type="button">Edit</button><button class="btn ghost" id="detailDuplicateEx" type="button">Duplicate</button><button class="btn ghost" id="detailArchiveEx" type="button">${ex.archived ? "Restore" : "Archive"}</button>${!ex.builtIn ? `<button class="btn danger" id="detailDeleteEx" type="button">Delete</button>` : ""}</div></div>`;
     byId("modalTitle").textContent = ex.name;
     byId("modalEyebrow").textContent = ex.builtIn ? "Built-in exercise" : "Custom exercise";
     byId("detailEditEx").addEventListener("click", () => {
@@ -2572,9 +2836,22 @@
     openModal(
       creating ? "New exercise" : "Edit exercise",
       creating ? "Add to your library" : v.name,
-      `<div class="stack"><label>Name<input id="exName" value="${esc(v.name)}" maxlength="70"></label><label>Targets <span class="meta">optional · shown under the name</span><input id="exFocus" value="${esc(exFocus(v))}" maxlength="60" placeholder="e.g. Upper chest, Triceps long head"></label><div class="form-grid"><label>Primary muscle<select id="exPrimary">${SEED.muscles.map((m) => `<option value="${m.id}" ${v.primaryMuscle === m.id ? "selected" : ""}>${m.name}</option>`).join("")}</select></label><label>Equipment<select id="exEquipment">${equipments.map((x) => `<option ${v.equipment === x ? "selected" : ""}>${x}</option>`).join("")}</select></label><label>Tracking type<select id="exTracking">${trackingTypes.map(([id, n]) => `<option value="${id}" ${v.trackingType === id ? "selected" : ""}>${n}</option>`).join("")}</select></label><label>Load increment (${weightUnit()})<input id="exIncrement" type="number" step="0.5" min="0" value="${unitWeight(v.incrementKg || 0)}"></label><label>Default min<input id="exMin" type="number" min="1" max="300" value="${v.defaultMin}"></label><label>Default max<input id="exMax" type="number" min="1" max="300" value="${v.defaultMax}"></label><label>Default rest (sec)<input id="exRest" type="number" min="0" max="900" value="${v.defaultRest}"></label></div><div><p class="meta" style="font-weight:800">Secondary muscles</p><p class="meta">These count fractionally toward muscle analytics using your secondary-set multiplier.</p><div class="checks">${SEED.muscles.map((m) => `<label class="check-chip"><input class="secondary-muscle" type="checkbox" value="${m.id}" ${(v.secondaryMuscles || []).includes(m.id) ? "checked" : ""}><span>${m.name}</span></label>`).join("")}</div></div><label>Persistent exercise note<textarea id="exNotes">${esc(v.notes || "")}</textarea></label>${!creating ? `<label class="check-chip"><input id="exArchived" type="checkbox" ${v.archived ? "checked" : ""}><span>Archived</span></label>` : ""}</div>`,
+      `<div class="stack"><label>Name<input id="exName" value="${esc(v.name)}" maxlength="70"></label><label>Targets <span class="meta">optional · shown under the name</span><input id="exFocus" value="${esc(exFocus(v))}" maxlength="60" placeholder="e.g. Upper chest, Triceps long head"></label><div class="form-grid"><label>Primary muscle<select id="exPrimary">${SEED.muscles.map((m) => `<option value="${m.id}" ${v.primaryMuscle === m.id ? "selected" : ""}>${m.name}</option>`).join("")}</select></label><label>Equipment<select id="exEquipment">${equipments.map((x) => `<option ${v.equipment === x ? "selected" : ""}>${x}</option>`).join("")}</select></label><label>Tracking type<select id="exTracking">${trackingTypes.map(([id, n]) => `<option value="${id}" ${v.trackingType === id ? "selected" : ""}>${n}</option>`).join("")}</select></label><label>Weight unit<select id="exUnit"><option value="" ${v.unit === "kg" || v.unit === "lb" ? "" : "selected"}>App setting (${weightUnit()})</option><option value="kg" ${v.unit === "kg" ? "selected" : ""}>kg</option><option value="lb" ${v.unit === "lb" ? "selected" : ""}>lb</option></select></label><label>Load increment (<span id="exIncUnit">${exUnit(v)}</span>)<input id="exIncrement" type="number" step="0.5" min="0" inputmode="decimal" value="${incrementShown(v, exUnit(v))}"></label><label>Default min<input id="exMin" type="number" min="1" max="300" value="${v.defaultMin}"></label><label>Default max<input id="exMax" type="number" min="1" max="300" value="${v.defaultMax}"></label><label>Default rest (sec)<input id="exRest" type="number" min="0" max="900" value="${v.defaultRest}"></label></div><div><p class="meta" style="font-weight:800">Secondary muscles</p><p class="meta">These count fractionally toward muscle analytics using your secondary-set multiplier.</p><div class="checks">${SEED.muscles.map((m) => `<label class="check-chip"><input class="secondary-muscle" type="checkbox" value="${m.id}" ${(v.secondaryMuscles || []).includes(m.id) ? "checked" : ""}><span>${m.name}</span></label>`).join("")}</div></div><label>Persistent exercise note<textarea id="exNotes">${esc(v.notes || "")}</textarea></label>${!creating ? `<label class="check-chip"><input id="exArchived" type="checkbox" ${v.archived ? "checked" : ""}><span>Archived</span></label>` : ""}</div>`,
       `<button class="btn primary" id="saveExerciseBtn" type="button">${creating ? "Create exercise" : "Save"}</button>`,
     );
+    // Switching the unit shows the increment in the new unit (5 lb instead of 2.5 kg).
+    let incUnit = exUnit(v);
+    byId("exUnit").addEventListener("change", () => {
+      const next = byId("exUnit").value || weightUnit(),
+        box = byId("exIncrement");
+      if (next === incUnit) return;
+      box.value =
+        box.value === String(incrementShown(v, incUnit))
+          ? incrementShown(v, next)
+          : round1(next === "lb" ? numIn(box.value) * LB : numIn(box.value) / LB);
+      incUnit = next;
+      byId("exIncUnit").textContent = next;
+    });
     byId("saveExerciseBtn").addEventListener("click", () => {
       const name = byId("exName").value.trim();
       if (!name) return showToast("Exercise name is required.");
@@ -2589,7 +2866,8 @@
         secondaryMuscles: second,
         equipment: byId("exEquipment").value,
         trackingType: byId("exTracking").value,
-        incrementKg: toKg(byId("exIncrement").value),
+        unit: byId("exUnit").value || null,
+        incrementKg: incrementFromForm(v, byId("exUnit").value || weightUnit(), byId("exIncrement").value),
         defaultMin: clamp(byId("exMin").value, 1, 300) || 8,
         defaultMax: clamp(byId("exMax").value, 1, 300) || 12,
         defaultRest: clamp(byId("exRest").value, 0, 900) ?? 90,
@@ -2607,6 +2885,14 @@
       else if (activeView === "programs") renderPrograms();
       else render();
     });
+  }
+  // The increment as the edit form shows it in a unit; saved in kg. Left untouched, the saved value is kept as is.
+  function incrementShown(ex, unit) {
+    return unit === "lb" ? loadStep({ ...ex, unit: "lb" }) : round1(num(ex.incrementKg));
+  }
+  function incrementFromForm(ex, unit, typed) {
+    if (String(typed).trim() === String(incrementShown(ex, unit))) return num(ex.incrementKg);
+    return Math.max(0, unit === "lb" ? numIn(typed) / LB : numIn(typed));
   }
   function openExercisePicker(onPick, title = "Choose exercise", excludeId = null) {
     let pickerMuscle = "all";
@@ -2872,19 +3158,18 @@
     return `<div class="history-exercise-card"><div class="row start"><div><strong>${esc(ex.name)}</strong><div class="meta">${muscleName(ex.primaryMuscle)} · ${esc(ex.equipment || "")}</div></div><button class="btn ghost small-btn history-exercise-analytics" data-exercise="${item.exerciseId}" type="button">Analytics</button></div>${item.notes ? `<div class="note-box" style="margin-top:8px">${esc(item.notes)}</div>` : ""}<div class="history-set-table"><div class="history-set-head"><span>Set</span><span>Type</span><span>Performance</span><span>RIR</span></div>${sets.map((st, idx) => `<div class="history-set-row"><span>${idx + 1}</span><span>${cap(st.type || "normal")}</span><strong>${setSummary(st, ex)}</strong><span>${st.rir == null ? "—" : st.rir}</span></div>`).join("") || `<div class="meta" style="padding:8px 0">No completed working sets.</div>`}</div></div>`;
   }
   function prDisplay(p) {
-    if (p.type === "Weight PR") return `${unitWeight(p.value)} ${weightUnit()}`;
-    if (p.type === "e1RM PR") return `${round1(unitWeight(p.value))} ${weightUnit()}`;
-    if (p.type === "Rep PR")
-      return num(p.loadKg) > 0 ? `${unitWeight(p.loadKg)} ${weightUnit()} × ${p.value}` : `${p.value} reps`;
-    if (p.type === "Duration PR")
-      return num(p.loadKg) > 0 ? `${unitWeight(p.loadKg)} ${weightUnit()} × ${p.value}s` : `${p.value}s`;
-    if (p.type === "Volume PR") return `${Math.round(unitWeight(p.value))} ${weightUnit()}-reps`;
+    const ex = getExercise(p.exerciseId);
+    if (p.type === "Weight PR") return exW(ex, p.value);
+    if (p.type === "e1RM PR") return exW(ex, p.value);
+    if (p.type === "Rep PR") return num(p.loadKg) > 0 ? `${exW(ex, p.loadKg)} × ${p.value}` : `${p.value} reps`;
+    if (p.type === "Duration PR") return num(p.loadKg) > 0 ? `${exW(ex, p.loadKg)} × ${p.value}s` : `${p.value}s`;
+    if (p.type === "Volume PR") return `${Math.round(exWeight(ex, p.value))} ${exUnit(ex)}-reps`;
     return "PR";
   }
   function setSummary(st, ex) {
-    if (isDurationBased(ex)) return `${unitWeight(st.loadKg || 0)}${weightUnit()} × ${st.durationSec}s`;
+    if (isDurationBased(ex)) return `${exWeight(ex, st.loadKg || 0)}${exUnit(ex)} × ${st.durationSec}s`;
     if (ex.trackingType === "distance_duration") return `${st.distanceKm}km`;
-    if (st.loadKg > 0) return `${unitWeight(st.loadKg)}${weightUnit()}×${st.reps}`;
+    if (st.loadKg > 0) return `${exWeight(ex, st.loadKg)}${exUnit(ex)}×${st.reps}`;
     return `${st.reps} reps`;
   }
 
@@ -3466,18 +3751,18 @@
       ex
         ? `
       <section class="card analytics-hero"><div class="row start"><div><p class="eyebrow">Exercise analytics</p><h2>${nameHTML(ex.name)}</h2><p class="meta">${muscleName(ex.primaryMuscle)} · ${esc(ex.equipment || "")} · ${rangeLabel}</p></div><span class="pill neutral">${trackingLabel(ex.trackingType)}</span></div>${latest ? `<div class="latest-performance"><span class="meta">Latest performance · ${fmtDate(latest.date)}</span><strong>${esc(latest.summary)}</strong></div>` : ""}</section>
-      <section class="grid-3 analytics-metrics"><div class="metric"><span class="meta">Current e1RM</span><strong>${latest?.e1rm ? `${round1(unitWeight(latest.e1rm))} ${weightUnit()}` : "—"}</strong></div><div class="metric"><span class="meta">Best e1RM</span><strong>${stats.bestE ? `${round1(unitWeight(stats.bestE))} ${weightUnit()}` : "—"}</strong></div><div class="metric"><span class="meta">Highest load</span><strong>${stats.bestLoad ? `${unitWeight(stats.bestLoad)} ${weightUnit()}` : "—"}</strong></div><div class="metric"><span class="meta">Best set</span><strong style="font-size:18px">${stats.bestSet ? esc(setSummary(stats.bestSet, ex)) : "—"}</strong></div><div class="metric"><span class="meta">Best session volume</span><strong>${stats.bestVolume ? Math.round(unitWeight(stats.bestVolume)) : "—"}</strong><span class="small muted">${weightUnit()}-reps</span></div><div class="metric"><span class="meta">Sessions logged</span><strong>${stats.sessions}</strong></div></section>
+      <section class="grid-3 analytics-metrics"><div class="metric"><span class="meta">Current e1RM</span><strong>${latest?.e1rm ? `${exWeight(ex, (latest.e1rm))} ${exUnit(ex)}` : "—"}</strong></div><div class="metric"><span class="meta">Best e1RM</span><strong>${stats.bestE ? `${exWeight(ex, (stats.bestE))} ${exUnit(ex)}` : "—"}</strong></div><div class="metric"><span class="meta">Highest load</span><strong>${stats.bestLoad ? `${exWeight(ex, stats.bestLoad)} ${exUnit(ex)}` : "—"}</strong></div><div class="metric"><span class="meta">Best set</span><strong style="font-size:18px">${stats.bestSet ? esc(setSummary(stats.bestSet, ex)) : "—"}</strong></div><div class="metric"><span class="meta">Best session volume</span><strong>${stats.bestVolume ? Math.round(exWeight(ex, stats.bestVolume)) : "—"}</strong><span class="small muted">${exUnit(ex)}-reps</span></div><div class="metric"><span class="meta">Sessions logged</span><strong>${stats.sessions}</strong></div></section>
       <section class="card"><div class="section-title"><h2>Estimated 1RM</h2><span class="meta">${rangeLabel}</span></div><div class="chart">${lineChart(
-        filtered(exerciseE1rmPoints(ex.id)).map((p) => ({ date: p.date, value: unitWeight(p.value) })),
-        weightUnit(),
+        filtered(exerciseE1rmPoints(ex.id)).map((p) => ({ date: p.date, value: exWeight(ex, p.value) })),
+        exUnit(ex),
       )}</div></section>
       <section class="grid-2 analytics-chart-grid"><div class="card"><div class="section-title"><h2>Top load</h2><span class="meta">${rangeLabel}</span></div><div class="chart">${lineChart(
-        filtered(exercisePerformanceSeries(ex.id, "load")).map((p) => ({ date: p.date, value: unitWeight(p.value) })),
-        weightUnit(),
+        filtered(exercisePerformanceSeries(ex.id, "load")).map((p) => ({ date: p.date, value: exWeight(ex, p.value) })),
+        exUnit(ex),
       )}</div></div><div class="card"><div class="section-title"><h2>Total reps</h2><span class="meta">${rangeLabel}</span></div><div class="chart">${lineChart(filtered(exercisePerformanceSeries(ex.id, "reps")), "reps")}</div></div></section>
       <section class="card"><div class="section-title"><h2>Session volume</h2><span class="meta">${rangeLabel}</span></div><div class="chart">${lineChart(
-        filtered(exercisePerformanceSeries(ex.id, "volume")).map((p) => ({ date: p.date, value: unitWeight(p.value) })),
-        `${weightUnit()}-reps`,
+        filtered(exercisePerformanceSeries(ex.id, "volume")).map((p) => ({ date: p.date, value: exWeight(ex, p.value) })),
+        `${exUnit(ex)}-reps`,
       )}</div></section>
       <section class="card"><div class="section-title"><h2>PR timeline</h2><span class="meta">All time · ${prTimeline.length}</span></div><div ${collapsibleAttrs("pr-timeline")}>${prTimeline.map((p) => `<div class="list-row"><div><strong>${esc(p.type)}</strong><div class="meta">${fmtDate(p.date)}</div></div><span class="pill good">${prDisplay(p)}</span></div>`).join("") || `<div class="empty">No PR history yet.</div>`}</div>${showAllButton("pr-timeline", prTimeline.length)}</section>
       <section class="card"><div class="section-title"><h2>Exercise history</h2><span class="meta">Most recent 30 sessions</span></div>${collapsibleList("exercise-history", exerciseHistoryRows(ex.id))}</section>`
@@ -3591,7 +3876,7 @@
           const sets = s.items.filter((i) => i.exerciseId === exId).flatMap((i) => workingSets(i)),
             best = Math.max(0, ...sets.map((st) => e1rm(st.loadKg, st.reps))),
             vol = sets.reduce((a, x) => a + setVolume(x), 0);
-          return `<div class="list-row click-row analytics-history-row" data-session="${s.id}"><div><strong>${fmtDate(s.date)}</strong><div class="meta">${sets.map((st) => setSummary(st, ex)).join(" · ") || "No completed working sets"}</div><div class="meta">${best ? `e1RM ${round1(unitWeight(best))} ${weightUnit()} · ` : ""}${sets.length} sets${vol ? ` · ${Math.round(unitWeight(vol))} ${weightUnit()}-reps` : ""}</div></div><span>›</span></div>`;
+          return `<div class="list-row click-row analytics-history-row" data-session="${s.id}"><div><strong>${fmtDate(s.date)}</strong><div class="meta">${sets.map((st) => setSummary(st, ex)).join(" · ") || "No completed working sets"}</div><div class="meta">${best ? `e1RM ${exW(ex, best)} · ` : ""}${sets.length} sets${vol ? ` · ${Math.round(exWeight(ex, vol))} ${exUnit(ex)}-reps` : ""}</div></div><span>›</span></div>`;
         })
         .join("") || `<div class="empty">No history for this exercise.</div>`
     );
@@ -3839,11 +4124,10 @@
       targetDisplay = "—",
       remainingText = "";
     if (["exercise_e1rm", "exercise_load"].includes(g.type)) {
-      currentDisplay = current ? `${round1(unitWeight(current))} ${weightUnit()}` : "—";
-      targetDisplay = `${round1(unitWeight(target))} ${weightUnit()}`;
-      remainingText = achieved
-        ? "Target reached"
-        : `${round1(unitWeight(Math.max(0, target - current)))} ${weightUnit()} remaining`;
+      const gex = getExercise(g.exerciseId);
+      currentDisplay = current ? exW(gex, current) : "—";
+      targetDisplay = exW(gex, target);
+      remainingText = achieved ? "Target reached" : `${exW(gex, Math.max(0, target - current))} remaining`;
     } else if (g.type === "weight") {
       currentDisplay = current ? `${round1(unitWeight(current))} ${weightUnit()}` : "—";
       targetDisplay = `${round1(unitWeight(target))} ${weightUnit()}`;
@@ -3878,8 +4162,8 @@
   function defaultGoalName(type, exerciseId, muscleId, target) {
     const ex = getExercise(exerciseId)?.name || "Exercise",
       mus = muscleName(muscleId || "chest");
-    if (type === "exercise_e1rm") return `${ex} e1RM ${round1(unitWeight(target))} ${weightUnit()}`;
-    if (type === "exercise_load") return `${ex} load ${round1(unitWeight(target))} ${weightUnit()}`;
+    if (type === "exercise_e1rm") return `${ex} e1RM ${exW(getExercise(exerciseId), target)}`;
+    if (type === "exercise_load") return `${ex} load ${exW(getExercise(exerciseId), target)}`;
     if (type === "weight") return `Body weight ${round1(unitWeight(target))} ${weightUnit()}`;
     if (type === "waist") return `Waist ≤ ${round1(target)} cm`;
     if (type === "weekly_workouts") return `${round1(target)} workouts per week`;
@@ -3901,7 +4185,7 @@
         deadline: "",
       };
     const initialTarget = ["exercise_e1rm", "exercise_load"].includes(v.type)
-      ? unitWeight(v.targetKg || 0)
+      ? exWeight(getExercise(v.exerciseId), v.targetKg || 0)
       : v.type === "weight"
         ? unitWeight(v.target || 0)
         : v.target || "";
@@ -3929,13 +4213,14 @@
                 : type === "weight"
                   ? `Target body weight (${weightUnit()})`
                   : isExercise
-                    ? `Target (${weightUnit()})`
+                    ? `Target (${exUnit(getExercise(byId("goalExercise").value))})`
                     : "Target";
       byId("goalTargetLabel").textContent = label;
       const temp = { type, exerciseId: byId("goalExercise").value, muscleId: byId("goalMuscle").value };
       const cur = goalRawCurrent(temp);
       let text = "Current logged value: ";
-      if (isExercise || type === "weight") text += cur ? `${round1(unitWeight(cur))} ${weightUnit()}` : "—";
+      if (isExercise) text += cur ? exW(getExercise(temp.exerciseId), cur) : "—";
+      else if (type === "weight") text += cur ? `${round1(unitWeight(cur))} ${weightUnit()}` : "—";
       else if (type === "waist") text += cur ? `${round1(cur)} cm` : "—";
       else if (type === "adherence_4w") text += `${Math.round(cur)}%`;
       else if (type === "muscle_effective") text += `${round1(cur)} sets/week`;
@@ -3955,7 +4240,7 @@
       obj.exerciseId = byId("goalExercise").value;
       obj.muscleId = byId("goalMuscle").value;
       obj.deadline = byId("goalDeadline").value || "";
-      if (["exercise_e1rm", "exercise_load"].includes(type)) obj.targetKg = toKg(targetInput);
+      if (["exercise_e1rm", "exercise_load"].includes(type)) obj.targetKg = exToKg(getExercise(byId("goalExercise").value), targetInput);
       else if (type === "weight") obj.target = toKg(targetInput);
       else obj.target = targetInput;
       if (!g || obj.baseline == null) obj.baseline = goalRawCurrent(obj);
@@ -4108,7 +4393,7 @@
         issues.length
           ? `<div class="stack health-preview">${issues
               .slice(0, 4)
-              .map((x) => `<div class="health-issue"><strong>${esc(x.title)}</strong><br>${esc(x.text)}</div>`)
+              .map(healthIssueHTML)
               .join("")}</div>`
           : `<div class="health-ok">No structural data problems detected.</div>`
       }<div class="button-grid"><button class="btn ghost" id="exportBtn" type="button">Export backup</button><label class="btn ghost">Import backup<input class="hidden" id="importInput" type="file" accept="application/json,.json"></label><button class="btn ghost span-all" id="healthDetailsBtn" type="button">View integrity report</button></div>${hasUndoCopy() ? `<div class="note-box" style="margin-top:12px">An undo copy from your last import or reset is kept on this device.<div class="wrap" style="margin-top:8px"><button class="btn ghost small-btn" id="undoImportBtn" type="button">Restore previous data</button><button class="btn ghost small-btn" id="discardUndoBtn" type="button">Delete undo copy</button></div></div>` : ""}</section>
@@ -4154,6 +4439,7 @@
     byId("editTargetsBtn").addEventListener("click", openMuscleTargetsModal);
     byId("editBodyFieldsBtn").addEventListener("click", openBodyFieldsModal);
     byId("healthDetailsBtn").addEventListener("click", openDataHealthReport);
+    wireHealthIssues(view);
     byId("exportBtn").addEventListener("click", exportBackup);
     byId("importInput").addEventListener("change", importBackup);
     byId("undoImportBtn")?.addEventListener("click", undoImport);
@@ -4235,6 +4521,17 @@
     downloadText(name, text, "application/json");
     markDone();
   }
+  function healthIssueHTML(x) {
+    return `<div class="health-issue"><strong>${esc(x.title)}</strong><br>${esc(x.text)}${x.sessionId ? `<div class="wrap" style="margin-top:6px"><button class="btn ghost small-btn open-issue-session" data-session="${x.sessionId}" type="button">Open workout to fix</button></div>` : ""}</div>`;
+  }
+  function wireHealthIssues(root) {
+    root.querySelectorAll(".open-issue-session").forEach((b) =>
+      b.addEventListener("click", () => {
+        closeModal();
+        openHistoryRecord(b.dataset.session);
+      }),
+    );
+  }
   function openDataHealthReport() {
     const issues = dataHealthIssues(),
       counts = {
@@ -4251,9 +4548,10 @@
         .map(([k, v]) => `<div class="metric"><span class="meta">${esc(k)}</span><strong>${v}</strong></div>`)
         .join(
           "",
-        )}</div><div class="note-box">Schema v${VERSION}${state.meta.lastMigratedAt ? ` · Last migration ${new Date(state.meta.lastMigratedAt).toLocaleString()}` : ""}${state.meta.lastBackupAt ? ` · Last backup ${new Date(state.meta.lastBackupAt).toLocaleString()}` : " · No backup recorded yet"}</div>${issues.length ? `<div class="stack">${issues.map((x) => `<div class="health-issue"><strong>${esc(x.title)}</strong><br>${esc(x.text)}</div>`).join("")}</div>` : `<div class="health-ok">All current integrity checks passed.</div>`}`,
+        )}</div><div class="note-box">Schema v${VERSION}${state.meta.lastMigratedAt ? ` · Last migration ${new Date(state.meta.lastMigratedAt).toLocaleString()}` : ""}${state.meta.lastBackupAt ? ` · Last backup ${new Date(state.meta.lastBackupAt).toLocaleString()}` : " · No backup recorded yet"}</div>${issues.length ? `<div class="stack">${issues.map(healthIssueHTML).join("")}</div>` : `<div class="health-ok">All current integrity checks passed.</div>`}`,
       `<button class="btn primary" id="healthExportModal" type="button">Export backup</button>`,
     );
+    wireHealthIssues(modalBody);
     byId("healthExportModal").addEventListener("click", () => {
       closeModal();
       exportBackup();
@@ -4263,12 +4561,57 @@
   function dayText(d) {
     return /^\d{4}-\d{2}-\d{2}$/.test(d || "") ? fmtDate(d, { month: "short", day: "numeric", year: "numeric" }) : String(d || "an unknown date");
   }
+  // Logged sets far outside what you usually do on that exercise: most likely typos ("2220 kg", "1012 reps").
+  // One entry per exercise per workout, newest first, each with the workout to open and fix.
+  function likelyTypos() {
+    const out = [];
+    historyIndex().byExercise.forEach((list, exId) => {
+      const ex = getExercise(exId) || list[0]?.item.exerciseSnapshot;
+      if (!ex) return;
+      const done = list.filter((e) => e.sets.length);
+      if (done.length < 3) return; // too little history to know what's usual
+      const field = isDurationBased(ex) ? "durationSec" : isRepBased(ex) ? "reps" : null;
+      done.forEach((e, i) => {
+        // Compared with the workouts around it (up to 4 before and 4 after), so months of progress don't look like a typo.
+        const near = done.slice(Math.max(0, i - 4), i).concat(done.slice(i + 1, i + 5));
+        const refLoad = usesLoad(ex) ? typicalTop(near, "loadKg") : 0,
+          refAmt = field ? typicalTop(near, field) : 0;
+        const oddLoad = (st) => refLoad > 0 && num(st.loadKg) > 0 && unlikelyLoad(num(st.loadKg), refLoad),
+          oddAmt = (st) => refAmt > 0 && unlikelyAmount(num(st[field]), refAmt, field, 0);
+        const odd = e.sets.filter((st) => oddLoad(st) || oddAmt(st));
+        if (!odd.length) return;
+        const usual = [
+          odd.some(oddLoad) ? exW(ex, refLoad) : "",
+          odd.some(oddAmt) ? `${refAmt}${field === "reps" ? " reps" : " s"}` : "",
+        ]
+          .filter(Boolean)
+          .join(" and ");
+        // About 2.2 times the usual weight: pounds typed into kg boxes.
+        const ratio = refLoad ? Math.max(...odd.map((st) => num(st.loadKg))) / refLoad : 0,
+          lbHint =
+            exUnit(ex) === "kg" && ratio > 1.9 && ratio < 2.6
+              ? " Looks like lb typed as kg: in the workout, tap ••• on the exercise → Weights here were typed in lb."
+              : "";
+        out.push({
+          title: "Possible typo",
+          text: `${ex.name} on ${dayText(e.session.date)}: ${setsSummaryText(odd, ex)}. You usually do about ${usual}.${lbHint}`,
+          sessionId: e.session.id,
+          setIds: odd.map((st) => st.id),
+          date: e.session.date,
+        });
+      });
+    });
+    return out.sort((a, b) => b.date.localeCompare(a.date));
+  }
   function dataHealthIssues() {
     const issues = [],
       sessionIds = new Set(),
       goalIds = new Set(),
       bodyIds = new Set(),
       bodyDates = new Map();
+    const typos = likelyTypos(),
+      typoSets = new Set(typos.flatMap((x) => x.setIds));
+    issues.push(...typos);
     if (Number(state.version) !== VERSION)
       issues.push({
         title: "Schema version mismatch",
@@ -4310,7 +4653,7 @@
               title: "Negative set value",
               text: `${dayText(s.date)} contains a negative load, rep, duration, or distance value.`,
             });
-          if (st.loadKg > 1000)
+          if (st.loadKg > 1000 && !typoSets.has(st.id))
             issues.push({
               title: "Unusually high load",
               text: `${dayText(s.date)} contains ${round1(st.loadKg)} kg. Verify this entry.`,

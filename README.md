@@ -23,6 +23,7 @@ Existing users are offered the revision once (Train and Programs → *Apply to m
 - Create custom exercises
 - Primary and secondary muscle mapping
 - Equipment, tracking type, rep/duration defaults, rest time, load increment, persistent notes
+- kg or lb per exercise (v2.14): a machine marked in lb is logged in lb while the rest stay in kg. Weights are saved in kg, so stats and PRs stay comparable
 - Archive exercises without deleting historical data
 
 ### Program Builder
@@ -36,7 +37,9 @@ Existing users are offered the revision once (Train and Programs → *Apply to m
 
 ### Live Workout
 - Start today's scheduled workout, another program day, or an empty workout
-- Previous performance and progression suggestion
+- Previous performance (each set as done, with the date and workout it came from) and a progression suggestion in the exercise's unit
+- Tap the weight heading (KG / LB) to switch that exercise's unit; tapping a filled-in box selects it so typing replaces it
+- Typo check before logging a set far outside what you usually do
 - Warm-up, normal, drop, failure, and AMRAP set types
 - Weight/reps, bodyweight, duration, and related tracking modes
 - RIR and technique flags
