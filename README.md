@@ -77,7 +77,7 @@ Existing users are offered the revision once (Train and Programs → *Apply to m
 - Current week vs target
 - Previous week and 4-week context
 - Exercise contributors per muscle
-- Interactive front/back schematic training heat map
+- Front/back body map (v2.15): an anatomical figure with each muscle coloured by this week's effective sets against its target (None, Started, Close, On target, Over). Tap a muscle to see its sets, what counted and what your next planned workout adds
 
 ### Body
 - Bodyweight and 7-day average
@@ -186,6 +186,6 @@ So screens stay consistent as features are added, the last block of `styles.css`
 
 ## Notes
 
-- The body heat map is intentionally a **schematic training visualization**, not a medical/anatomical illustration.
+- The body map is a **training visualization**: muscles are drawn in their real places and shapes so they are easy to recognise, but it is not a medical illustration.
 - Effective sets use a default 0.5 contribution for secondary muscles. Direct sets remain separately visible.
 - e1RM is a trend estimate, not a tested 1RM.

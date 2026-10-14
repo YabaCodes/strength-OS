@@ -23,7 +23,7 @@
     DB_STORE = "kv";
   const PRE_UPGRADE_DAYS = 30;
   const VERSION = 3;
-  const APP_VERSION = "2.14.0"; // Bump together with VERSION in sw.js.
+  const APP_VERSION = "2.15.0"; // Bump together with VERSION in sw.js.
   const trackingTypes = [
     ["weight_reps", "Weight + reps"],
     ["bodyweight_reps", "Bodyweight + reps"],
@@ -107,6 +107,7 @@
   let wakeLock = null,
     audioCtx = null;
   let indexCache = null; // see historyIndex()
+  let mapMuscle = null; // muscle tapped on the body map (Progress → Muscles)
   const typedLoads = new Set(); // sets whose weight you typed while the app was open (not pre-filled)
 
   // Listeners that must be in place before saved data finishes loading, so these one-off events aren't missed.
@@ -3613,7 +3614,8 @@
     const trend = muscleWeeklySeries(selectedMuscleTrendId, muscleTrendWeeks),
       target = state.settings.muscleTargets[selectedMuscleTrendId] || [0, 0],
       trendAvg = trend.length ? trend.reduce((a, b) => a + b.value, 0) / trend.length : 0;
-    return `<section class="card"><div class="section-title"><div><p class="eyebrow">Muscle analytics</p><h2>This week</h2></div><span class="meta">${fmtDate(start)} – ${fmtDate(end)}</span></div><div class="legend heat-legend" style="margin-top:10px"><span>None</span><i class="heat-0"></i><span class="legend-gap"></span><span>Low</span><i class="heat-1"></i><i class="heat-2"></i><i class="heat-3"></i><i class="heat-4"></i><span>High</span></div><div class="body-map-wrap" style="margin-top:8px">${bodyMapSVG("front", stats)}${bodyMapSVG("back", stats)}</div><p class="meta">Gray means no sets yet this week. Blue gets darker as you approach and pass your weekly target.</p></section>
+    if (mapMuscle && !SEED.muscles.some((m) => m.id === mapMuscle)) mapMuscle = null;
+    return `<section class="card muscle-map-card"><div class="section-title"><div><p class="eyebrow">Muscle analytics</p><h2>This week</h2></div><span class="meta">${fmtDate(start)} – ${fmtDate(end)}</span></div><div class="body-map-wrap${mapMuscle ? " has-selection" : ""}" id="bodyMapWrap">${bodyMapSVG("front", stats, mapMuscle)}${bodyMapSVG("back", stats, mapMuscle)}</div><div id="muscleMapDetail" aria-live="polite">${mapMuscle ? muscleMapPanelHTML(mapMuscle, stats) : ""}</div><div class="heat-scale" aria-label="Colour key">${MUSCLE_LEVELS.map((n, i) => `<div class="heat-step${i === 3 ? " key" : ""}"><i class="heat-${i}"></i><span>${n}</span></div>`).join("")}</div><p class="meta bm-note"><span class="only-dark">Brighter</span><span class="only-light">Darker</span> means more of your weekly target is done: on target is within your target range, over is above it. Tap a muscle to see what counted.</p></section>
     <section class="card"><div class="section-title"><div><p class="eyebrow">Volume trend</p><h2>${nameHTML(muscleName(selectedMuscleTrendId))}</h2></div><span class="pill neutral">${muscleTrendWeeks}-week avg ${round1(trendAvg)}</span></div><div class="analytics-top" style="margin-top:10px"><label>Muscle<select id="muscleTrendSelect">${SEED.muscles.map((m) => `<option value="${m.id}" ${m.id === selectedMuscleTrendId ? "selected" : ""}>${m.name}</option>`).join("")}</select></label><div class="tabs seg">${[
       [4, "4W"],
       [8, "8W"],
@@ -3663,66 +3665,195 @@
       );
     return out;
   }
-  function bodyMapSVG(side, stats) {
-    const intensity = (id) => {
-      const t = state.settings.muscleTargets[id] || [1, 1],
-        v = stats[id]?.effective || 0,
-        r = t[0] ? v / t[0] : 0;
-      // Colors live in CSS (--heat-0 … --heat-4) so light and dark themes can each use readable shades.
-      return `var(--heat-${r <= 0 ? 0 : r < 0.45 ? 1 : r < 0.8 ? 2 : r < 1.2 ? 3 : 4})`;
-    };
-    const f = side === "front",
-      label = f ? "Front" : "Back";
-    return `<div class="anatomy-panel"><div class="anatomy-label"><strong>${label}</strong><span>Tap a muscle</span></div><svg class="body-map anatomy-map" viewBox="0 0 220 430" role="group" aria-label="${label} muscles">
-      <circle class="sil anatomy-head" cx="110" cy="31" r="22"/>
-      <path class="sil" d="M96 51 Q110 58 124 51 L129 64 Q145 67 154 78 L166 116 L157 122 L145 91 L139 183 Q133 202 128 214 L92 214 Q87 202 81 183 L75 91 L63 122 L54 116 L66 78 Q75 67 91 64 Z"/>
-      <path class="sil" d="M66 80 Q56 91 51 112 L38 179 Q36 190 43 194 Q50 197 55 185 L69 126 L78 91 Z"/>
-      <path class="sil" d="M154 80 Q164 91 169 112 L182 179 Q184 190 177 194 Q170 197 165 185 L151 126 L142 91 Z"/>
-      <path class="sil" d="M92 208 Q83 222 80 246 L73 333 Q72 354 82 390 L95 390 Q96 362 96 337 L102 251 L109 220 Z"/>
-      <path class="sil" d="M128 208 Q137 222 140 246 L147 333 Q148 354 138 390 L125 390 Q124 362 124 337 L118 251 L111 220 Z"/>
-      ${labelShapes(f ? frontMuscles(intensity) : backMuscles(intensity), stats)}
-    </svg></div>`;
+  // ---------- BODY MAP ----------
+  // Anatomy on a 200-wide grid centred on x = 100. Each shape is drawn for the figure's right side (the viewer's
+  // left) and mirrored for the other side. Muscles are listed back to front: later shapes overlap earlier ones and a
+  // thin line separates them, the way neighbouring muscles look. [shape, fibre lines] per part of a muscle.
+  const BODY = {
+    head: [100, 31, 18, 24],
+    patella: [82.5, 322, 5.5, 6.5],
+    silhouette: [
+      "M88.5 44 Q88.5 58 85 70 L100 70 L100 44 Z", // neck
+      "M100 63 L87 65 Q74 69 64 75 Q57 81 57 94 L61 118 Q66 128 67.5 142 Q69.5 162 73.5 180 Q70.5 196 66.5 210 Q63 224 63.5 238 L100 243 Z", // torso
+      "M66 75 Q49.5 75 45 92 Q43.5 104 44 118 Q42 136 41 150 Q40 158 39 163 Q34 178 33 196 Q32 210 32 222 L43 224 Q45 208 48 193 Q52 176 54 163 Q57 150 60 136 L64 118 Z", // arm
+      "M32 219 Q27 230 27 244 Q28 258 33 262 Q38 264 41 258 Q43 249 43 238 L43 222 Z", // hand
+      "M66.5 206 Q62 224 62.5 248 Q63 276 68 306 Q70 318 69 328 Q66 346 67 366 Q69 388 73 408 L86 409 Q87 390 89 372 Q91 352 90 334 Q91 320 93 304 Q98 272 100 238 L100 200 Z", // leg
+      "M73 406 Q65 418 66 428 Q67 433 74 433 L88 433 Q90 422 87 406 Z", // foot
+    ],
+    front: {
+      // Parts the app doesn't track: neck, shin, hip, the side of the ribs.
+      neutral: [
+        "M91 52 Q94 63 97.5 74 L100.2 73.5 Q97 62 94 51 Z",
+        "M73.5 333 Q79.5 340 80.5 358 Q80.5 380 79.5 401 L76 401 Q73.5 378 72.5 358 Q72 343 73.5 333 Z",
+        "M66.5 207 Q71.5 212 72.5 224 Q70.5 233 65.5 238 Q63.5 222 66.5 207 Z",
+        "M69 110 L76.5 115 L70.5 117.5 Z",
+        "M70 118.5 L77 123 L71.5 125.5 Z",
+        "M71 127 L76.5 130.5 L72 133 Z",
+      ],
+      muscles: [
+        ["traps", [["M89 60 Q83 68 67 74.5 Q73.5 77 78.5 77 Q86 72.5 91.5 67.5 Z", []]]],
+        ["side_delts", [["M62.5 75.5 Q48.5 76 45 92 Q43.5 106 46 117 Q49 126 54 129.5 Q54.5 112 55.5 98 Q57 84 62.5 75.5 Z", ["M53 83 Q48 99 50 119"]]]],
+        ["front_delts", [["M74.5 77 Q64 75 58 80 Q54 92 54.5 106 Q55 120 56.5 129.5 Q61.5 120 64.5 106 Q67.5 90 74.5 77 Z", ["M66 83 Q60 97 58.5 120"]]]],
+        ["chest", [["M99 77.5 Q86 75.5 74 78.5 Q66 83 63.5 95 Q64.5 103 68 108 Q74.5 120 86 124.5 Q94 125.5 99 121.5 Z", ["M97 82 Q84 82 70 88", "M97 90 Q84 92 67 96", "M97 99 Q85 101 67 102", "M97 108 Q86 110 70 106", "M96 116 Q86 118 75 113"]]]],
+        ["biceps", [["M60.5 121 Q51 123 47.5 135 Q45.5 148 48 158 Q52 165 56 160 Q60 146 62 129 Z", ["M56.5 128 Q52 142 52.5 158"]]]],
+        ["forearms", [
+          ["M51 158 Q42 160 37.5 172 Q34 186 33.5 202 Q33.2 212 34 219 L38.5 219 Q39.5 204 42 190 Q45.5 175 52 164 Z", ["M44 166 Q38 182 36.5 206"]],
+          ["M55 162 Q48 166 44.5 180 Q41.5 196 40 210 Q39.5 217 41.5 221 L43.5 221 Q45.5 207 48.5 193 Q52 179 55.5 167 Z", ["M51 170 Q45.5 186 42.5 212"]],
+        ]],
+        ["obliques", [["M71.5 128 Q80 130 87.5 133 L87.5 180 Q86.5 194 81.5 203 Q75 198 73 186 Q69.5 158 71.5 128 Z", ["M74 136 Q80.5 146 85.5 155", "M73.5 150 Q79.5 162 85.5 172", "M74 166 Q78.5 178 84 189"]]]],
+        ["abs", [
+          ["M88.5 126.5 Q94 123.5 98.8 125.5 L98.8 140 Q93.5 142 88.5 140 Z", []],
+          ["M88.5 143 Q93.5 141.5 98.8 143 L98.8 157 Q93.5 158.5 88.5 157 Z", []],
+          ["M88.5 160 Q93.5 158.5 98.8 160 L98.8 174 Q93.5 175.5 88.5 174 Z", []],
+          ["M88.8 177 Q93.5 175.5 98.8 177 L98.8 205 Q95 211 92 205 Q89 193 88.8 177 Z", []],
+        ]],
+        ["adductors", [["M86 228 Q95 231 99.8 238 Q99 256 95.5 272 Q91 266 88 252 Z", ["M93 238 Q95 252 95 266"]]]],
+        ["quads", [
+          ["M67 212 Q75 214 80 228 Q83 252 81 280 Q79 300 77.5 315 Q72.5 318.5 70 310 Q64 285 63 256 Q63.5 228 67 212 Z", ["M69 226 Q69 262 72.5 306"]], // vastus lateralis
+          ["M83 218 Q90.5 234 90.5 260 Q90 286 85.5 308 Q82.5 313 79.5 307 Q76 285 76.5 258 Q77.5 234 83 218 Z", ["M83.5 232 Q84 268 83 302"]], // rectus femoris
+          ["M92 266 Q98 280 97 299 Q95 315 86 319.5 Q82.5 312 85 300 Q89.5 286 92 266 Z", ["M92 280 Q91 298 87 314"]], // vastus medialis
+        ]],
+        ["calves", [
+          ["M84 330 Q92 338 92.5 356 Q91.5 374 86.5 386 Q81.5 378 81 360 Q81 342 84 330 Z", ["M86.5 340 Q88 358 86 378"]],
+          ["M70 335 Q65.5 354 67 374 Q68.5 390 72.5 401 Q73 378 72.8 356 Q72.5 343 70 335 Z", []],
+        ]],
+      ],
+    },
+    back: {
+      neutral: ["M77 396 L85 396 Q84.5 404 83.5 410 L78.5 410 Q77.5 404 77 396 Z"], // Achilles tendon
+      muscles: [
+        ["side_delts", [["M58 77 Q49 80 46 92 Q44.5 105 48 116 Q48.5 100 51.5 90 Z", []]]],
+        ["rear_delts", [["M67 78 Q55 77 49 88 Q45.5 101 49 114 Q53.5 122 58.5 117 Q61.5 102 68 89 Z", ["M62 85 Q55 98 54 114"]]]],
+        ["traps", [["M100 49 L95.5 49 Q92.5 58 87.5 66 Q76 73 63.5 77 Q76 84 86 95 Q93.5 118 100 152 Z", ["M97 56 Q88 68 70 78", "M98.5 84 Q90 88 76 85", "M99 116 Q94 102 88 96"]]]],
+        ["upper_back", [
+          ["M85.5 97 Q76 92 67.5 98 Q64.5 110 68 121 Q78.5 126 89.5 119 Q90 107 85.5 97 Z", ["M84 101 Q75.5 108 69.5 116", "M87.5 112 Q80 117 71.5 120"]],
+          ["M67.5 123.5 Q64.5 128 64.5 132 Q73 135 83 126.5 Z", []],
+        ]],
+        ["lats", [["M63.5 127 Q78 134 91.5 126 Q95.5 141 97.5 157 Q93.5 174 85.5 191 Q77 191 73.5 180 Q68.5 153 63.5 127 Z", ["M69 137 Q79.5 161 84 187", "M77 135 Q86.5 153 89.5 178", "M86.5 131 Q92.5 147 94 163"]]]],
+        ["lower_back", [["M92 150 Q97.5 151 99.4 155 L99.4 204 Q95 210 90.5 204 Q88.5 176 92 150 Z", ["M95 160 Q94.5 182 95 202"]]]],
+        ["triceps", [["M62 112 Q52 112 47 124 Q44 140 45.5 156 Q50 164 55 160 Q60 142 62 112 Z", ["M54.5 120 Q50.5 136 50.5 156", "M58.5 122 Q56 139 55.5 155"]]]],
+        ["forearms", [
+          ["M51 158 Q42 160 37.5 172 Q34 186 33.5 202 Q33.2 212 34 219 L38.5 219 Q39.5 204 42 190 Q45.5 175 52 164 Z", ["M44 166 Q38 182 36.5 206"]],
+          ["M55 162 Q48 166 44.5 180 Q41.5 196 40 210 Q39.5 217 41.5 221 L43.5 221 Q45.5 207 48.5 193 Q52 179 55.5 167 Z", ["M51 170 Q45.5 186 42.5 212"]],
+        ]],
+        ["glutes", [
+          ["M67.5 200 Q78 190 94 193 Q86 199 78 203 Q71 207 67 213 Z", []], // glute medius
+          ["M70.5 207 Q80 198 95.5 201 Q99.6 210 99.6 222 L99.6 236 Q92 245 79.5 243 Q67.5 239 65.5 225 Q65.5 213 70.5 207 Z", ["M96 209 Q86 218 70 225", "M97.5 223 Q86 231 70.5 233"]], // glute max
+        ]],
+        ["adductors", [["M95.5 244 Q99.8 250 99.8 262 Q98 272 95 278 Z", []]]],
+        ["hamstrings", [
+          ["M68.5 244 Q78 248 82.5 266 Q85 288 82 309 Q77.5 316 73.5 309 Q66.5 286 66 262 Q66 250 68.5 244 Z", ["M71.5 254 Q78 278 78 304"]], // biceps femoris
+          ["M83 248 Q93 244 97 251 Q97 274 93 298 Q90.5 311 85.5 316 Q82.5 292 83 268 Z", ["M89.5 256 Q91 279 88.5 306"]], // semitendinosus
+        ]],
+        ["calves", [
+          ["M70.5 324 Q65 342 67 362 Q71 375 78.8 370 Q81 350 80.3 332 Q77 321 70.5 324 Z", ["M72.5 333 Q70 350 72 366"]],
+          ["M80.3 328 Q89 321 93 334 Q95.5 352 91 370 Q85 380 80.8 371 Q79.5 350 80.3 328 Z", ["M87.5 334 Q90 352 86.5 370"]],
+          ["M68.5 366 Q70 381 74.5 397 L77 397 Q73.5 381 72.5 369 Z", []], // soleus
+          ["M91 369 Q90 383 85.5 397 L88 397 Q92 383 92.5 367 Z", []],
+        ]],
+      ],
+    },
+  };
+  // The other side of the body: every x becomes 200 − x. Paths use absolute commands with "x y" pairs only.
+  function mirrorPath(d) {
+    return d.replace(/(-?\d+(?:\.\d+)?) (-?\d+(?:\.\d+)?)/g, (m, x, y) => `${+(200 - Number(x)).toFixed(2)} ${y}`);
   }
-  // One focusable shape per muscle (left and right halves would otherwise be announced twice).
-  function labelShapes(markup, stats) {
-    const seen = new Set();
-    return markup.replace(
-      /<path class="muscle muscle-shape" role="button" tabindex="0" aria-label="([^"]+)" data-muscle="([^"]+)"/g,
-      (m, label, id) => {
-        if (seen.has(id)) return `<path class="muscle muscle-shape" aria-hidden="true" data-muscle="${id}"`;
-        seen.add(id);
-        return `<path class="muscle muscle-shape" role="button" tabindex="0" aria-label="${label}, ${round1(stats[id]?.effective || 0)} effective sets this week" data-muscle="${id}"`;
-      },
+  const bothSides = (d) => [d, mirrorPath(d)];
+  // Status of a muscle this week, from its target range: 0 none, 1 started, 2 close, 3 on target, 4 over.
+  const MUSCLE_LEVELS = ["None", "Started", "Close", "On target", "Over"];
+  function muscleLevel(mid, stats) {
+    const [lo, hi] = state.settings.muscleTargets[mid] || [0, 0],
+      v = stats[mid]?.effective || 0;
+    if (v <= 0) return 0;
+    if (!(num(lo) > 0)) return 3;
+    if (v < lo * 0.5) return 1;
+    if (v < lo) return 2;
+    return !(num(hi) > 0) || v <= hi ? 3 : 4;
+  }
+  // The silhouette and untracked parts never change, so they're built once per side.
+  const bodyBaseCache = {};
+  function bodyBase(side) {
+    if (bodyBaseCache[side]) return bodyBaseCache[side];
+    const [hx, hy, rx, ry] = BODY.head,
+      uid = `bm-${side}`;
+    const head = `M${hx} ${hy - ry} Q${hx + rx + 2} ${hy - ry} ${hx + rx} ${hy + 2} Q${hx + rx - 2} ${hy + ry - 4} ${hx} ${hy + ry} Q${hx - rx + 2} ${hy + ry - 4} ${hx - rx} ${hy + 2} Q${hx - rx - 2} ${hy - ry} ${hx} ${hy - ry} Z`;
+    const hair =
+      side === "back"
+        ? `<path class="bm-hair" d="M${hx - rx + 1} ${hy + 2} Q${hx - rx} ${hy - ry} ${hx} ${hy - ry} Q${hx + rx} ${hy - ry} ${hx + rx - 1} ${hy + 2} Q${hx} ${hy - 4} ${hx - rx + 1} ${hy + 2} Z"/>`
+        : "";
+    const [px, py, prx, pry] = BODY.patella;
+    const knees = side === "front" ? `<ellipse cx="${px}" cy="${py}" rx="${prx}" ry="${pry}"/><ellipse cx="${200 - px}" cy="${py}" rx="${prx}" ry="${pry}"/>` : "";
+    const sacrum = side === "back" ? `<path d="M95 203 Q100 207 105 203 L105 214 Q100 218 95 214 Z"/>` : "";
+    return (bodyBaseCache[side] =
+      `<defs><radialGradient id="${uid}-sheen" cx="0.36" cy="0.28" r="0.85"><stop offset="0" class="bm-hi"/><stop offset="0.55" class="bm-mid"/><stop offset="1" class="bm-lo"/></radialGradient><linearGradient id="${uid}-body" x1="0" y1="0" x2="0" y2="1"><stop offset="0" class="bm-body-top"/><stop offset="1" class="bm-body-bot"/></linearGradient></defs>` +
+      `<g class="bm-body" fill="url(#${uid}-body)"><path d="${head}"/>${BODY.silhouette.flatMap(bothSides).map((d) => `<path d="${d}"/>`).join("")}</g>${hair}` +
+      `<g class="bm-neutral">${BODY[side].neutral.flatMap(bothSides).map((d) => `<path d="${d}"/>`).join("")}${knees}${sacrum}</g>`);
+  }
+  function bodyMapSVG(side, stats, selected = null) {
+    const label = side === "front" ? "Front" : "Back",
+      uid = `bm-${side}`;
+    const muscles = BODY[side].muscles
+      .map(([mid, parts]) => {
+        const lv = muscleLevel(mid, stats),
+          sel = mid === selected;
+        const shapes = parts
+          .map(([d, fibres]) => {
+            const fill = bothSides(d)
+              .map((p) => `<path class="bm-fill" d="${p}" style="fill:var(--heat-${lv})"/><path class="bm-sheen" d="${p}" fill="url(#${uid}-sheen)"/>`)
+              .join("");
+            return fibres.length ? `${fill}<path class="bm-fibre" d="${fibres.flatMap(bothSides).join(" ")}"/>` : fill;
+          })
+          .join("");
+        return `<g class="bm-muscle${sel ? " selected" : ""}" data-muscle="${mid}" role="button" tabindex="0" aria-pressed="${sel}" aria-label="${esc(muscleName(mid))}: ${MUSCLE_LEVELS[lv].toLowerCase()}, ${round1(stats[mid]?.effective || 0)} effective sets this week">${shapes}</g>`;
+      })
+      .join("");
+    return `<figure class="bm-figure"><figcaption>${label}</figcaption><svg class="bm-svg" viewBox="22 4 156 432" role="group" aria-label="${label} of the body">${bodyBase(side)}${muscles}</svg></figure>`;
+  }
+  // The panel under the body map for the muscle you tapped.
+  function plannedWorkoutFor(mid) {
+    const p = activeProgram();
+    if (!p) return null;
+    const today = isoToday(),
+      start = startOfWeek(today),
+      end = addDays(start, 6),
+      mult = num(state.settings.secondaryMultiplier || 0.5);
+    // Days already done, skipped or under way this week don't count again.
+    const handled = new Set(
+      state.sessions
+        .filter((s) => s.date >= start && s.date <= end && s.programDayId)
+        .map((s) => s.programDayId),
     );
+    for (let d = today; d <= end; d = addDays(d, 1)) {
+      const dow = dateObj(d).getDay(),
+        day = p.days.find((x) => Number(x.weekday) === dow);
+      if (!day || handled.has(day.id)) continue;
+      const adds = day.items.reduce((a, it) => {
+        const ex = getExercise(it.exerciseId);
+        if (!ex) return a;
+        return a + (ex.primaryMuscle === mid ? num(it.sets) : (ex.secondaryMuscles || []).includes(mid) ? num(it.sets) * mult : 0);
+      }, 0);
+      if (adds > 0) return { date: d, day, adds, when: d === today ? "Today's" : `${weekdayName(dow)}'s` };
+    }
+    return null;
   }
-  function frontMuscles(c) {
-    return `
-    <path class="muscle muscle-shape" role="button" tabindex="0" aria-label="Chest" data-muscle="chest" d="M87 72 Q99 66 109 73 L108 102 Q96 105 84 97 L81 82 Z" style="fill:${c("chest")}"/><path class="muscle muscle-shape" role="button" tabindex="0" aria-label="Chest" data-muscle="chest" d="M133 72 Q121 66 111 73 L112 102 Q124 105 136 97 L139 82 Z" style="fill:${c("chest")}"/>
-    <path class="muscle muscle-shape" role="button" tabindex="0" aria-label="Front delts" data-muscle="front_delts" d="M79 70 Q68 69 63 80 Q63 92 74 96 L83 85 Z" style="fill:${c("front_delts")}"/><path class="muscle muscle-shape" role="button" tabindex="0" aria-label="Front delts" data-muscle="front_delts" d="M141 70 Q152 69 157 80 Q157 92 146 96 L137 85 Z" style="fill:${c("front_delts")}"/>
-    <path class="muscle muscle-shape" role="button" tabindex="0" aria-label="Side delts" data-muscle="side_delts" d="M64 77 Q56 84 58 98 L65 108 L73 95 L72 80 Z" style="fill:${c("side_delts")}"/><path class="muscle muscle-shape" role="button" tabindex="0" aria-label="Side delts" data-muscle="side_delts" d="M156 77 Q164 84 162 98 L155 108 L147 95 L148 80 Z" style="fill:${c("side_delts")}"/>
-    <path class="muscle muscle-shape" role="button" tabindex="0" aria-label="Biceps" data-muscle="biceps" d="M59 105 Q52 116 51 137 Q55 149 62 139 L69 112 Z" style="fill:${c("biceps")}"/><path class="muscle muscle-shape" role="button" tabindex="0" aria-label="Biceps" data-muscle="biceps" d="M161 105 Q168 116 169 137 Q165 149 158 139 L151 112 Z" style="fill:${c("biceps")}"/>
-    <path class="muscle muscle-shape" role="button" tabindex="0" aria-label="Forearms" data-muscle="forearms" d="M50 143 Q44 154 41 178 Q41 187 46 188 L55 180 L61 147 Z" style="fill:${c("forearms")}"/><path class="muscle muscle-shape" role="button" tabindex="0" aria-label="Forearms" data-muscle="forearms" d="M170 143 Q176 154 179 178 Q179 187 174 188 L165 180 L159 147 Z" style="fill:${c("forearms")}"/>
-    <path class="muscle muscle-shape" role="button" tabindex="0" aria-label="Abs" data-muscle="abs" d="M98 104 Q110 100 122 104 L121 154 Q110 160 99 154 Z" style="fill:${c("abs")}"/><path class="muscle-detail-line" d="M110 105V157M99 122H121M99 139H121"/>
-    <path class="muscle muscle-shape" role="button" tabindex="0" aria-label="Obliques" data-muscle="obliques" d="M83 101 L98 106 L99 155 L89 173 L82 150 Z" style="fill:${c("obliques")}"/><path class="muscle muscle-shape" role="button" tabindex="0" aria-label="Obliques" data-muscle="obliques" d="M137 101 L122 106 L121 155 L131 173 L138 150 Z" style="fill:${c("obliques")}"/>
-    <path class="muscle muscle-shape" role="button" tabindex="0" aria-label="Quads" data-muscle="quads" d="M90 219 Q82 232 82 257 L84 322 Q89 336 96 320 L98 281 L100 238 L99 222 Z" style="fill:${c("quads")}"/><path class="muscle muscle-shape" role="button" tabindex="0" aria-label="Quads" data-muscle="quads" d="M130 219 Q138 232 138 257 L136 322 Q131 336 124 320 L122 281 L120 238 L121 222 Z" style="fill:${c("quads")}"/>
-    <path class="muscle muscle-shape" role="button" tabindex="0" aria-label="Adductors" data-muscle="adductors" d="M102 222 L108 222 Q107 240 103 258 L100 276 L102 238 Z" style="fill:${c("adductors")}"/><path class="muscle muscle-shape" role="button" tabindex="0" aria-label="Adductors" data-muscle="adductors" d="M118 222 L112 222 Q113 240 117 258 L120 276 L118 238 Z" style="fill:${c("adductors")}"/>
-    <path class="muscle muscle-shape" role="button" tabindex="0" aria-label="Calves" data-muscle="calves" d="M82 330 Q77 349 81 374 Q84 385 90 375 L94 337 Z" style="fill:${c("calves")}"/><path class="muscle muscle-shape" role="button" tabindex="0" aria-label="Calves" data-muscle="calves" d="M138 330 Q143 349 139 374 Q136 385 130 375 L126 337 Z" style="fill:${c("calves")}"/>
-  `;
-  }
-  function backMuscles(c) {
-    return `
-    <path class="muscle muscle-shape" role="button" tabindex="0" aria-label="Traps" data-muscle="traps" d="M92 61 Q110 72 128 61 L134 86 L121 96 L110 88 L99 96 L86 86 Z" style="fill:${c("traps")}"/>
-    <path class="muscle muscle-shape" role="button" tabindex="0" aria-label="Rear delts" data-muscle="rear_delts" d="M80 70 Q68 70 63 82 Q64 94 76 98 L85 86 Z" style="fill:${c("rear_delts")}"/><path class="muscle muscle-shape" role="button" tabindex="0" aria-label="Rear delts" data-muscle="rear_delts" d="M140 70 Q152 70 157 82 Q156 94 144 98 L135 86 Z" style="fill:${c("rear_delts")}"/>
-    <path class="muscle muscle-shape" role="button" tabindex="0" aria-label="Side delts" data-muscle="side_delts" d="M64 77 Q56 84 58 98 L65 108 L73 95 L72 80 Z" style="fill:${c("side_delts")}"/><path class="muscle muscle-shape" role="button" tabindex="0" aria-label="Side delts" data-muscle="side_delts" d="M156 77 Q164 84 162 98 L155 108 L147 95 L148 80 Z" style="fill:${c("side_delts")}"/>
-    <path class="muscle muscle-shape" role="button" tabindex="0" aria-label="Upper back" data-muscle="upper_back" d="M82 88 Q96 83 109 94 L106 119 L84 111 Z" style="fill:${c("upper_back")}"/><path class="muscle muscle-shape" role="button" tabindex="0" aria-label="Upper back" data-muscle="upper_back" d="M138 88 Q124 83 111 94 L114 119 L136 111 Z" style="fill:${c("upper_back")}"/>
-    <path class="muscle muscle-shape" role="button" tabindex="0" aria-label="Lats" data-muscle="lats" d="M82 105 Q93 112 104 119 L101 164 L87 177 L80 147 Z" style="fill:${c("lats")}"/><path class="muscle muscle-shape" role="button" tabindex="0" aria-label="Lats" data-muscle="lats" d="M138 105 Q127 112 116 119 L119 164 L133 177 L140 147 Z" style="fill:${c("lats")}"/>
-    <path class="muscle muscle-shape" role="button" tabindex="0" aria-label="Lower back" data-muscle="lower_back" d="M102 120 Q110 116 118 120 L123 174 Q110 183 97 174 Z" style="fill:${c("lower_back")}"/>
-    <path class="muscle muscle-shape" role="button" tabindex="0" aria-label="Triceps" data-muscle="triceps" d="M59 104 Q52 117 51 138 Q56 150 63 139 L69 112 Z" style="fill:${c("triceps")}"/><path class="muscle muscle-shape" role="button" tabindex="0" aria-label="Triceps" data-muscle="triceps" d="M161 104 Q168 117 169 138 Q164 150 157 139 L151 112 Z" style="fill:${c("triceps")}"/>
-    <path class="muscle muscle-shape" role="button" tabindex="0" aria-label="Forearms" data-muscle="forearms" d="M50 143 Q44 154 41 178 Q41 187 46 188 L55 180 L61 147 Z" style="fill:${c("forearms")}"/><path class="muscle muscle-shape" role="button" tabindex="0" aria-label="Forearms" data-muscle="forearms" d="M170 143 Q176 154 179 178 Q179 187 174 188 L165 180 L159 147 Z" style="fill:${c("forearms")}"/>
-    <path class="muscle muscle-shape" role="button" tabindex="0" aria-label="Glutes" data-muscle="glutes" d="M91 183 Q110 174 109 211 Q97 221 85 211 L87 190 Z" style="fill:${c("glutes")}"/><path class="muscle muscle-shape" role="button" tabindex="0" aria-label="Glutes" data-muscle="glutes" d="M129 183 Q110 174 111 211 Q123 221 135 211 L133 190 Z" style="fill:${c("glutes")}"/>
-    <path class="muscle muscle-shape" role="button" tabindex="0" aria-label="Hamstrings" data-muscle="hamstrings" d="M90 219 Q82 235 83 270 L86 323 Q92 334 98 318 L102 258 L106 222 Z" style="fill:${c("hamstrings")}"/><path class="muscle muscle-shape" role="button" tabindex="0" aria-label="Hamstrings" data-muscle="hamstrings" d="M130 219 Q138 235 137 270 L134 323 Q128 334 122 318 L118 258 L114 222 Z" style="fill:${c("hamstrings")}"/>
-    <path class="muscle muscle-shape" role="button" tabindex="0" aria-label="Calves" data-muscle="calves" d="M82 329 Q76 348 80 375 Q85 388 91 374 L95 337 Z" style="fill:${c("calves")}"/><path class="muscle muscle-shape" role="button" tabindex="0" aria-label="Calves" data-muscle="calves" d="M138 329 Q144 348 140 375 Q135 388 129 374 L125 337 Z" style="fill:${c("calves")}"/>
-  `;
+  function muscleMapPanelHTML(mid, stats) {
+    const st = stats[mid] || { direct: 0, effective: 0, contributors: {} },
+      [lo, hi] = state.settings.muscleTargets[mid] || [0, 0],
+      lv = muscleLevel(mid, stats),
+      eff = st.effective || 0,
+      plan = plannedWorkoutFor(mid),
+      adds = plan?.adds || 0,
+      max = Math.max(num(hi) * 1.2, eff + adds, 1),
+      pct = (v) => `${Math.max(0, Math.min(100, (v / max) * 100)).toFixed(1)}%`,
+      contrib = Object.entries(st.contributors || {}).sort((a, b) => b[1] - a[1]);
+    const target = num(lo) > 0 ? `Target ${lo}–${hi}` : "No target set";
+    return `<div class="map-detail-card"><div class="row start"><h3>${esc(muscleName(mid))}</h3><span class="pill level-pill level-${lv}">${MUSCLE_LEVELS[lv]}</span></div>
+      <div class="map-detail-amount"><strong>${round1(eff)} effective set${round1(eff) === 1 ? "" : "s"}</strong><span class="meta">${target}</span></div>
+      <div class="target-track" role="img" aria-label="${round1(eff)} effective sets${num(lo) > 0 ? ` of a ${lo} to ${hi} set target` : ""}${plan ? `; ${plan.when.replace("'s", "")} adds about ${round1(adds)}` : ""}">${num(lo) > 0 ? `<span class="track-band" style="left:${pct(lo)};width:${pct(Math.max(0, hi - lo))}"></span>` : ""}<span class="track-fill" style="width:${pct(eff)}"></span>${plan ? `<span class="track-plan" style="left:${pct(eff)};width:${pct(adds)}"></span>` : ""}</div>
+      <p class="meta">${num(lo) > 0 ? "Shaded: your target. " : ""}${plan ? `Dashed: ${plan.when} ${esc(plan.day.name)} adds about ${round1(adds)}.` : "No more planned workouts for it this week."}</p>
+      <p class="eyebrow">What counted</p>
+      <div class="map-detail-list">${contrib.map(([n, v]) => `<div><span>${esc(n)}</span><strong>${round1(v)} set${round1(v) === 1 ? "" : "s"}</strong></div>`).join("") || `<div class="meta">Nothing logged for it yet this week.</div>`}</div>
+      <div class="preview-actions"><button class="btn ghost" id="mapDetailMore" data-muscle="${mid}" type="button">Details</button><button class="btn ghost" id="mapDetailClose" type="button">Close</button></div></div>`;
   }
 
   function exerciseAnalyticsHTML() {
@@ -4264,7 +4395,7 @@
 
   function wireProgressTab() {
     if (progressTab === "muscles") {
-      document.querySelectorAll(".muscle-shape,.muscle-detail").forEach((x) => {
+      document.querySelectorAll(".muscle-detail").forEach((x) => {
         x.addEventListener("click", () => openMuscleDetail(x.dataset.muscle));
         x.addEventListener("keydown", (e) => {
           if (e.key === "Enter" || e.key === " ") {
@@ -4273,6 +4404,7 @@
           }
         });
       });
+      wireBodyMap();
       byId("muscleTrendSelect")?.addEventListener("change", (e) => {
         selectedMuscleTrendId = e.target.value;
         renderProgress();
@@ -4336,6 +4468,48 @@
           r.addEventListener("click", () => openGoalModal(state.goals.find((x) => x.id === r.dataset.goal))),
         );
     }
+  }
+  // Tap a muscle: it's outlined, the rest dims, and its details show under the figures. Tap it again to close.
+  function selectMapMuscle(mid) {
+    mapMuscle = mid && mid !== mapMuscle ? mid : null;
+    const start = startOfWeek(isoToday()),
+      stats = muscleStatsForRange(start, addDays(start, 6));
+    byId("bodyMapWrap")?.classList.toggle("has-selection", !!mapMuscle);
+    document.querySelectorAll("#bodyMapWrap .bm-muscle").forEach((g) => {
+      const on = g.dataset.muscle === mapMuscle;
+      g.classList.toggle("selected", on);
+      g.setAttribute("aria-pressed", String(on));
+    });
+    const panel = byId("muscleMapDetail");
+    if (panel) panel.innerHTML = mapMuscle ? muscleMapPanelHTML(mapMuscle, stats) : "";
+    wireMapPanel();
+    if (mapMuscle) panel?.scrollIntoView({ block: "nearest", behavior: "smooth" });
+  }
+  function wireMapPanel() {
+    byId("mapDetailMore")?.addEventListener("click", (e) => openMuscleDetail(e.currentTarget.dataset.muscle));
+    byId("mapDetailClose")?.addEventListener("click", () => {
+      const was = mapMuscle;
+      selectMapMuscle(null);
+      document.querySelector(`#bodyMapWrap .bm-muscle[data-muscle="${was}"]`)?.focus({ preventScroll: true });
+    });
+  }
+  function wireBodyMap() {
+    const wrap = byId("bodyMapWrap");
+    if (!wrap) return;
+    wrap.addEventListener("click", (e) => {
+      const g = e.target.closest(".bm-muscle");
+      // A tap on the body between muscles closes the details.
+      if (g) selectMapMuscle(g.dataset.muscle);
+      else if (mapMuscle && e.target.closest("svg")) selectMapMuscle(null);
+    });
+    wrap.addEventListener("keydown", (e) => {
+      const g = e.target.closest(".bm-muscle");
+      if (g && (e.key === "Enter" || e.key === " ")) {
+        e.preventDefault();
+        selectMapMuscle(g.dataset.muscle);
+      }
+    });
+    wireMapPanel();
   }
   function openMuscleDetail(mid) {
     const start = startOfWeek(isoToday()),

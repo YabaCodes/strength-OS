@@ -1894,23 +1894,41 @@ html[data-density="compact"] .exercise-body {
   color: var(--text);
 }
 
-/* Heat map colours: gray = nothing yet, then light → dark blue toward and past the target */
+/* Heat map colours: gray = nothing yet, then light → dark blue toward and past the target (v2.15: body map shades) */
 :root {
-  --heat-0: #e3e7ed;
-  --heat-1: #bfdbfe;
-  --heat-2: #60a5fa;
-  --heat-3: #2563eb;
-  --heat-4: #1e3a8a;
+  --heat-0: #bcc5d3;
+  --heat-1: #c3d5fd;
+  --heat-2: #86a9f6;
+  --heat-3: #3767dd;
+  --heat-4: #1c3b9e;
+  --bm-body-top: #dfe4ec;
+  --bm-body-bot: #d3d9e3;
+  --bm-neutral: #c8cfda;
+  --bm-fascia: #f3f5f9;
+  --bm-fibre: #ffffff;
+  --bm-fibre-op: 0.45;
+  --bm-sheen: 0.35;
+  --bm-shade: 0.16;
+  --bm-select: #0f172a;
   --sil: #f3f5f8;
   --sil-stroke: #cbd5e1;
   --muscle-stroke: rgba(255, 255, 255, 0.9);
 }
 html[data-theme="dark"] {
-  --heat-0: #2a3548;
-  --heat-1: #1e3a8a;
-  --heat-2: #2563eb;
-  --heat-3: #60a5fa;
-  --heat-4: #bfdbfe;
+  --heat-0: #3b4762;
+  --heat-1: #1d3c8f;
+  --heat-2: #2c5fd9;
+  --heat-3: #5a95fb;
+  --heat-4: #a9cbfd;
+  --bm-body-top: #2a364d;
+  --bm-body-bot: #222c40;
+  --bm-neutral: #34415a;
+  --bm-fascia: #1d273a;
+  --bm-fibre: #0b1120;
+  --bm-fibre-op: 0.28;
+  --bm-sheen: 0.2;
+  --bm-shade: 0.3;
+  --bm-select: #ffffff;
   --sil: #172133;
   --sil-stroke: #334155;
   --muscle-stroke: #0b1120;
@@ -3070,3 +3088,221 @@ html[data-theme="dark"] .superset-link {
 .exercise-card.unit-lb .set-load:focus {
   outline-color: var(--warn);
 }
+
+
+/* ---------- v2.15: anatomical body map ---------- */
+.muscle-map-card .body-map-wrap {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+  margin-top: 12px;
+}
+.bm-figure {
+  margin: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 4px;
+  min-width: 0;
+}
+.bm-figure figcaption {
+  font-size: var(--fs-xs, 11px);
+  font-weight: 850;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--muted);
+}
+.bm-svg {
+  display: block;
+  width: 100%;
+  max-width: 200px;
+  height: auto;
+  aspect-ratio: 156 / 432;
+  overflow: visible;
+  -webkit-tap-highlight-color: transparent;
+}
+html[data-density="compact"] .bm-svg {
+  max-width: 170px;
+}
+.bm-body path {
+  stroke: none;
+}
+.bm-hair {
+  fill: var(--bm-neutral);
+  opacity: 0.7;
+}
+.bm-neutral {
+  fill: var(--bm-neutral);
+}
+.bm-hi {
+  stop-color: #ffffff;
+  stop-opacity: var(--bm-sheen);
+}
+.bm-mid {
+  stop-color: #ffffff;
+  stop-opacity: 0;
+}
+.bm-lo {
+  stop-color: #000000;
+  stop-opacity: var(--bm-shade);
+}
+.bm-body-top {
+  stop-color: var(--bm-body-top);
+}
+.bm-body-bot {
+  stop-color: var(--bm-body-bot);
+}
+.bm-muscle {
+  cursor: pointer;
+  outline: none;
+  transition: opacity 0.15s;
+}
+.bm-muscle .bm-fill {
+  stroke: none;
+  transition: fill 0.2s;
+}
+.bm-muscle .bm-sheen {
+  stroke: var(--bm-fascia);
+  stroke-width: 0.6;
+  stroke-linejoin: round;
+}
+.bm-muscle .bm-fibre {
+  fill: none;
+  stroke: var(--bm-fibre);
+  stroke-width: 0.7;
+  stroke-linecap: round;
+  opacity: var(--bm-fibre-op);
+  pointer-events: none;
+}
+.has-selection .bm-muscle:not(.selected) {
+  opacity: 0.5;
+}
+.bm-muscle.selected .bm-sheen,
+.bm-muscle:focus-visible .bm-sheen {
+  stroke: var(--bm-select);
+  stroke-width: 1.6;
+}
+@media (hover: hover) and (pointer: fine) {
+  .bm-muscle:hover .bm-sheen {
+    stroke: var(--bm-select);
+    stroke-width: 1;
+  }
+}
+.heat-scale {
+  display: grid;
+  grid-template-columns: repeat(5, minmax(0, 1fr));
+  gap: 6px;
+  margin-top: 12px;
+}
+.heat-step {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 5px;
+  min-width: 0;
+}
+.heat-step i {
+  display: block;
+  width: 100%;
+  height: 8px;
+  border-radius: 99px;
+}
+.heat-step span {
+  font-size: 11px;
+  color: var(--muted);
+  text-align: center;
+  white-space: nowrap;
+}
+.heat-step.key span {
+  color: var(--text);
+  font-weight: 750;
+}
+.heat-step i.heat-0 { background: var(--heat-0); }
+.heat-step i.heat-1 { background: var(--heat-1); }
+.heat-step i.heat-2 { background: var(--heat-2); }
+.heat-step i.heat-3 { background: var(--heat-3); }
+.heat-step i.heat-4 { background: var(--heat-4); }
+.bm-note {
+  margin: 10px 0 0;
+}
+html[data-theme="dark"] .only-light,
+html:not([data-theme="dark"]) .only-dark {
+  display: none;
+}
+.map-detail-card {
+  margin-top: 12px;
+  display: grid;
+  gap: 10px;
+  padding: 14px;
+  border: 1px solid var(--line);
+  border-radius: 16px;
+  background: var(--bg);
+}
+.map-detail-card h3 {
+  margin: 0;
+  font-size: 19px;
+}
+.map-detail-card .eyebrow {
+  margin: 2px 0 0;
+}
+.map-detail-card > p.meta {
+  margin: 0;
+}
+.map-detail-amount {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  gap: 10px;
+}
+.map-detail-amount strong {
+  font-size: 15px;
+}
+.target-track {
+  position: relative;
+  height: 12px;
+  border-radius: 99px;
+  background: var(--line);
+  overflow: hidden;
+}
+.target-track span {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+}
+.track-band {
+  background: var(--accent-soft);
+  box-shadow: inset 0 0 0 1px var(--accent);
+  opacity: 0.9;
+}
+.track-fill {
+  left: 0;
+  border-radius: 99px;
+  background: var(--accent);
+}
+.track-plan {
+  top: 4px !important;
+  bottom: 4px !important;
+  border-top: 2px dashed var(--accent);
+  opacity: 0.7;
+}
+.map-detail-list {
+  display: grid;
+  gap: 6px;
+}
+.map-detail-list > div {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  font-size: var(--fs-sm, 14px);
+}
+.map-detail-list > div span {
+  min-width: 0;
+}
+.map-detail-list > div strong {
+  white-space: nowrap;
+}
+.level-pill.level-0 { background: var(--line); color: var(--text); }
+.level-pill.level-1 { background: var(--accent-soft); color: var(--text); }
+.level-pill.level-2 { background: var(--accent-soft); color: var(--text); }
+.level-pill.level-3 { background: var(--good-soft); color: var(--good); }
+.level-pill.level-4 { background: var(--warn-soft); color: var(--warn); }
