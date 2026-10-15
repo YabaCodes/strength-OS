@@ -3306,3 +3306,42 @@ html:not([data-theme="dark"]) .only-dark {
 .level-pill.level-2 { background: var(--accent-soft); color: var(--text); }
 .level-pill.level-3 { background: var(--good-soft); color: var(--good); }
 .level-pill.level-4 { background: var(--warn-soft); color: var(--warn); }
+
+/* v2.16.0 — interactive, read-only training week. Maintains 44px touch targets,
+   horizontal access at narrow widths, and existing color/density tokens. */
+.train-week-card { display: grid; gap: 13px; }
+.train-week-top { display: flex; align-items: center; justify-content: space-between; gap: 12px; min-width: 0; }
+.train-week-top > div:first-child { min-width: 0; }
+.train-week-top h2 { font-size: 18px; margin: 3px 0 4px; }
+.train-week-top .meta { line-height: 1.4; }
+.train-week-progress { position: relative; flex: 0 0 54px; width: 54px; height: 54px; display: grid; place-items: center; }
+.train-week-progress svg { width: 54px; height: 54px; overflow: visible; }
+.train-week-progress circle { fill: none; stroke-width: 3.5; }
+.train-week-ring-track { stroke: var(--line); }
+.train-week-ring-fill { stroke: var(--good); stroke-linecap: round; transition: stroke-dasharray .35s ease; }
+.train-week-progress > span { position: absolute; font-size: 12px; font-weight: 800; font-variant-numeric: tabular-nums; }
+.train-week-ribbon { display: grid; grid-template-columns: repeat(7,minmax(44px,1fr)); gap: 4px; overflow-x: auto; overscroll-behavior-x: contain; padding: 2px 0 5px; scrollbar-width: none; }
+.train-week-ribbon::-webkit-scrollbar { display: none; }
+.train-week-day { appearance: none; border: 1px solid transparent; background: var(--bg); color: var(--muted); border-radius: 13px; min-height: 68px; min-width: 44px; padding: 6px 2px; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 3px; transition: background .15s ease,border-color .15s ease,transform .15s ease; }
+.train-week-day:active { transform: scale(.96); }
+.train-week-day.selected { border-color: var(--accent); background: var(--accent-soft); color: var(--text); }
+.train-week-day.today .train-week-number { text-decoration: underline; text-underline-offset: 3px; }
+.train-week-dayname { font-size: 10px; font-weight: 700; }
+.train-week-number { font-size: 11px; font-weight: 750; font-variant-numeric: tabular-nums; }
+.train-week-mark { width: 23px; height: 23px; border: 1.5px solid var(--line); border-radius: 50%; display: grid; place-items: center; font-weight: 800; font-size: 14px; line-height: 1; }
+.train-week-day.done .train-week-mark { background: var(--good); border-color: var(--good); color: #fff; }
+.train-week-day.paused .train-week-mark { border-color: var(--warn); color: var(--warn); }
+.train-week-day.skipped .train-week-mark { color: var(--muted); }
+.train-week-day.planned .train-week-mark { border-color: var(--accent); color: var(--accent); }
+.train-week-inspect { display: flex; align-items: center; justify-content: space-between; gap: 12px; background: var(--bg); border: 1px solid var(--line); border-radius: 13px; padding: 12px; }
+.train-week-inspect-copy { min-width: 0; display: grid; gap: 4px; }
+.train-week-inspect strong { font-size: 14px; overflow-wrap: anywhere; }
+.train-week-inspect .meta { margin: 0; }
+.train-week-inspect > button { flex-shrink: 0; }
+@media (max-width: 380px) {
+  .train-week-inspect { align-items: stretch; flex-direction: column; }
+  .train-week-inspect > button { align-self: flex-start; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .train-week-day,.train-week-ring-fill { transition: none; }
+}
