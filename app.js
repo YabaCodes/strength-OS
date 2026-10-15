@@ -23,7 +23,7 @@
     DB_STORE = "kv";
   const PRE_UPGRADE_DAYS = 30;
   const VERSION = 3;
-  const APP_VERSION = "2.15.0"; // Bump together with VERSION in sw.js.
+  const APP_VERSION = "2.16.0"; // Bump together with VERSION in sw.js.
   const trackingTypes = [
     ["weight_reps", "Weight + reps"],
     ["bodyweight_reps", "Bodyweight + reps"],
@@ -79,6 +79,7 @@
     updateReady = false;
   let state = null; // loaded in boot()
   let activeView = "train";
+  let trainSelectedDate = isoToday(); // Transient Train week selection; never stored or written to workouts.
   let progressTab = "overview";
   let historyMonth = startOfMonth(isoToday());
   let historyExerciseFilter = "all",
@@ -1135,6 +1136,103 @@
   }
 
   // ---------- TRAIN ----------
+  function trainWeekHTML(p, week) {
+    // UI selection is transient: never create sessions or change their historical dates.
+    const today = isoToday();
+    const start = startOfWeek(today);
+    const dates = Array.from({ length: 7 }, (_, i) => addDays(start, i));
+    if (!dates.includes(trainSelectedDate)) trainSelectedDate = today;
+    const doneStatuses = ["complete", "shortened"];
+    const planned = dates.flatMap((date) =>
+      (p?.days || [])
+        .filter((day) => Number(day.weekday) === dateObj(date).getDay())
+        .map((day) => ({ date, day })),
+    );
+    const fulfilled = planned.filter(({ date, day }) =>
+      state.sessions.some((s) => s.date === date && s.programDayId === day.id && doneStatuses.includes(s.status)),
+    ).length;
+    const percent = planned.length ? Math.round((fulfilled / planned.length) * 100) : 0;
+    const ribbon = dates.map((date) => {
+      const sessions = state.sessions.filter((s) => s.date === date);
+      const plannedCount = planned.filter((x) => x.date === date).length;
+      const completed = sessions.some((s) => doneStatuses.includes(s.status));
+      const paused = !completed && sessions.some((s) => s.status === "in_progress");
+      const skipped = !completed && !paused && sessions.some((s) => s.status === "skipped");
+      const kind = completed ? "done" : paused ? "paused" : skipped ? "skipped" : plannedCount ? "planned" : "rest";
+      const kindName = { done: "Workout logged", paused: "Workout paused", skipped: "Marked skipped", planned: "On current program", rest: "No workout logged" }[kind];
+      const dateLabel = fmtDate(date, { weekday: "long", month: "short", day: "numeric" });
+      return `<button type="button" class="train-week-day ${kind}${date === trainSelectedDate ? " selected" : ""}${date === today ? " today" : ""}" data-train-date="${date}" aria-pressed="${date === trainSelectedDate}" aria-label="${esc(dateLabel)}: ${esc(kindName)}">
+        <span class="train-week-dayname">${esc(fmtDate(date, { weekday: "short" }))}</span>
+        <span class="train-week-mark" aria-hidden="true">${completed ? "✓" : paused ? "◐" : skipped ? "−" : plannedCount ? "○" : "·"}</span>
+        <span class="train-week-number">${dateObj(date).getDate()}</span>
+      </button>`;
+    }).join("");
+    const date = trainSelectedDate;
+    const logs = state.sessions.filter((s) => s.date === date);
+    const recorded = logs.filter((s) => doneStatuses.includes(s.status))
+      .sort((a, b) => (b.endTime || b.startTime || 0) - (a.endTime || a.startTime || 0));
+    const paused = logs.find((s) => s.status === "in_progress");
+    const skipped = logs.some((s) => s.status === "skipped");
+    const dayPlans = (p?.days || []).filter((d) => Number(d.weekday) === dateObj(date).getDay());
+    let title, description, action = "";
+    if (recorded.length) {
+      const sets = recorded.reduce((n, s) => n + s.items.reduce((m, item) => m + workingSets(item).length, 0), 0);
+      title = recorded.length === 1 ? recorded[0].name : `${recorded.length} workouts logged`;
+      description = `${recorded.length} completed or shortened session${recorded.length === 1 ? "" : "s"} · ${sets} working sets`;
+      action = `<button type="button" class="btn ghost small-btn" id="trainWeekRecordBtn" data-session="${esc(recorded[0].id)}">View record</button>`;
+    } else if (paused) {
+      title = paused.name;
+      description = "Workout in progress or paused. Resume where you left off.";
+      action = `<button type="button" class="btn primary small-btn" id="trainWeekResumeBtn" data-session="${esc(paused.id)}">Resume</button>`;
+    } else if (skipped) {
+      title = "Marked as skipped";
+      description = "No completed workout logged for this date.";
+    } else if (dayPlans.length) {
+      title = dayPlans.map((d) => d.name).join(" · ");
+      description = date === today
+        ? "Scheduled today in your current program."
+        : `Current program's ${weekdayName(dateObj(date).getDay())} plan. Previewing does not log a past or future workout.`;
+    } else {
+      title = "Recovery / flexible day";
+      description = "No workout logged on this date. Your current program has no scheduled session for this weekday.";
+    }
+    if (!recorded.length && !paused && dayPlans.length) {
+      action = `<button type="button" class="btn ghost small-btn" id="trainWeekPreviewBtn" data-day="${esc(dayPlans[0].id)}">Preview session</button>`;
+      if (skipped) description += " You can still preview the current program.";
+    }
+    return `<section class="card train-week-card" aria-label="This week's workouts">
+      <div class="train-week-top"><div><p class="eyebrow">This week</p><h2>Training overview</h2><p class="meta">${week.done} workout${week.done === 1 ? "" : "s"} logged · ${fulfilled}/${planned.length} scheduled sessions completed</p></div>
+        <div class="train-week-progress" aria-label="${percent}% of current program's scheduled sessions completed">
+          <svg viewBox="0 0 40 40" aria-hidden="true"><circle class="train-week-ring-track" cx="20" cy="20" r="16"/><circle class="train-week-ring-fill" cx="20" cy="20" r="16" pathLength="100" stroke-dasharray="${percent} 100" transform="rotate(-90 20 20)"/></svg>
+          <span>${planned.length ? `${percent}%` : "—"}</span>
+        </div>
+      </div>
+      <div class="train-week-ribbon" role="group" aria-label="Select a day to inspect">${ribbon}</div>
+      <div class="train-week-inspect" aria-live="polite"><div class="train-week-inspect-copy">
+        <span class="meta">${esc(fmtDate(date, { weekday: "long", month: "short", day: "numeric" }))}${date === today ? " · Today" : ""}</span>
+        <strong>${esc(title)}</strong><p class="meta">${esc(description)}</p>
+        ${date !== today && action.includes("trainWeekPreviewBtn") ? `<p class="meta">If you start this program workout, it will be recorded for today—not the selected date.</p>` : ""}
+      </div>${action}</div>
+    </section>`;
+  }
+
+  function wireTrainWeek(p) {
+    view.querySelectorAll(".train-week-day").forEach((button) =>
+      button.addEventListener("click", () => {
+        const before = button.getBoundingClientRect().top;
+        trainSelectedDate = button.dataset.trainDate;
+        renderTrain();
+        const after = view.querySelector('.train-week-day[aria-pressed="true"]')?.getBoundingClientRect().top;
+        if (after != null) window.scrollBy(0, after - before);
+      }),
+    );
+    byId("trainWeekRecordBtn")?.addEventListener("click", (e) => openHistoryRecord(e.currentTarget.dataset.session));
+    byId("trainWeekResumeBtn")?.addEventListener("click", (e) => resumeSession(e.currentTarget.dataset.session));
+    byId("trainWeekPreviewBtn")?.addEventListener("click", (e) => {
+      if (p) openTrainPreview(p.id, e.currentTarget.dataset.day);
+    });
+  }
+
   function renderTrain() {
     const live = liveSession();
     if (live) return renderLiveSession(live);
@@ -1173,6 +1271,7 @@
     view.innerHTML = `<div class="stack">
       <section class="card hero train-hero"><div class="row start"><div><p class="meta">Active program</p><h2>${nameHTML(p?.name || "No active program")}</h2><p class="meta">${d ? `Today · ${esc(d.name)}${doneToday ? ` · ${doneToday.status === "skipped" ? "skipped" : "done"}` : ""}` : "No scheduled session today"}</p></div>${showWeek ? `<span class="pill train-summary-badge">${week.done}/${week.scheduled} this week</span>` : ""}</div></section>
       ${unfinished.map((u) => `<section class="card unfinished-card"><div class="row start"><div><p class="eyebrow">Unfinished workout</p><h2>${nameHTML(u.name)}</h2><p class="meta">${fmtDate(u.date)} · ${u.items.reduce((n, i) => n + workingSets(i).length, 0)} sets logged</p></div><span class="pill warn">Paused</span></div><div class="preview-actions" style="margin-top:12px"><button class="btn primary resume-session" data-session="${u.id}" type="button">Resume</button><button class="btn ghost discard-session" data-session="${u.id}" type="button">Discard</button></div></section>`).join("")}
+      ${trainWeekHTML(p, week)}
       ${revisionCardHTML("train")}
       ${backupReminderHTML()}
       ${
@@ -1210,6 +1309,7 @@
         showToast("Unfinished workout discarded.");
       }),
     );
+    wireTrainWeek(p);
     wireBackupReminder();
     wireRevisionCard(renderTrain);
     document
