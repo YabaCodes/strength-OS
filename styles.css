@@ -3307,43 +3307,73 @@ html:not([data-theme="dark"]) .only-dark {
 .level-pill.level-3 { background: var(--good-soft); color: var(--good); }
 .level-pill.level-4 { background: var(--warn-soft); color: var(--warn); }
 
-/* v2.16.0 — interactive, read-only training week. Maintains 44px touch targets,
-   horizontal access at narrow widths, and existing color/density tokens. */
+/* v2.16.0 → v2.18.0 — the Train week: one card driven by the selected day. Keeps 44px touch targets,
+   sideways scrolling at narrow widths, and the existing color/density tokens. */
 .train-week-card { display: grid; gap: 13px; }
 .train-week-top { display: flex; align-items: center; justify-content: space-between; gap: 12px; min-width: 0; }
 .train-week-top > div:first-child { min-width: 0; }
-.train-week-top h2 { font-size: 18px; margin: 3px 0 4px; }
-.train-week-top .meta { line-height: 1.4; }
-.train-week-progress { position: relative; flex: 0 0 54px; width: 54px; height: 54px; display: grid; place-items: center; }
-.train-week-progress svg { width: 54px; height: 54px; overflow: visible; }
-.train-week-progress circle { fill: none; stroke-width: 3.5; }
+.train-week-top .eyebrow { margin: 0; color: var(--muted); overflow-wrap: anywhere; }
+.train-week-top h2 { font-size: 20px; margin: 3px 0 4px; }
+.train-week-top .meta { line-height: 1.4; margin: 0; }
+.train-week-progress { position: relative; flex: 0 0 58px; width: 58px; height: 58px; display: grid; place-items: center; }
+.train-week-progress svg { width: 58px; height: 58px; overflow: visible; }
+.train-week-progress circle { fill: none; stroke-width: 3.6; }
 .train-week-ring-track { stroke: var(--line); }
 .train-week-ring-fill { stroke: var(--good); stroke-linecap: round; transition: stroke-dasharray .35s ease; }
-.train-week-progress > span { position: absolute; font-size: 12px; font-weight: 800; font-variant-numeric: tabular-nums; }
-.train-week-ribbon { display: grid; grid-template-columns: repeat(7,minmax(44px,1fr)); gap: 4px; overflow-x: auto; overscroll-behavior-x: contain; padding: 2px 0 5px; scrollbar-width: none; }
+.train-week-progress > span { position: absolute; font-size: 13px; font-weight: 800; font-variant-numeric: tabular-nums; }
+.train-week-progress.full > span { color: var(--good); }
+.train-week-ribbon { display: grid; grid-template-columns: repeat(7,minmax(44px,1fr)); gap: 3px; overflow-x: auto; overscroll-behavior-x: contain; padding: 2px 0 3px; scrollbar-width: none; }
 .train-week-ribbon::-webkit-scrollbar { display: none; }
-.train-week-day { appearance: none; border: 1px solid transparent; background: var(--bg); color: var(--muted); border-radius: 13px; min-height: 68px; min-width: 44px; padding: 6px 2px; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 3px; transition: background .15s ease,border-color .15s ease,transform .15s ease; }
-.train-week-day:active { transform: scale(.96); }
+.train-week-day { appearance: none; -webkit-appearance: none; font: inherit; border: 1px solid transparent; background: var(--bg); color: var(--muted); border-radius: 13px; min-height: 72px; min-width: 44px; padding: 6px 2px; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 3px; cursor: pointer; transition: background .15s ease, border-color .15s ease, transform .12s ease; }
+.train-week-day:active { transform: scale(.94); }
 .train-week-day.selected { border-color: var(--accent); background: var(--accent-soft); color: var(--text); }
-.train-week-day.today .train-week-number { text-decoration: underline; text-underline-offset: 3px; }
+.train-week-day.today .train-week-number { text-decoration: underline; text-underline-offset: 3px; text-decoration-thickness: 2px; color: var(--text); }
 .train-week-dayname { font-size: 10px; font-weight: 700; }
 .train-week-number { font-size: 11px; font-weight: 750; font-variant-numeric: tabular-nums; }
-.train-week-mark { width: 23px; height: 23px; border: 1.5px solid var(--line); border-radius: 50%; display: grid; place-items: center; font-weight: 800; font-size: 14px; line-height: 1; }
-.train-week-day.done .train-week-mark { background: var(--good); border-color: var(--good); color: #fff; }
-.train-week-day.paused .train-week-mark { border-color: var(--warn); color: var(--warn); }
-.train-week-day.skipped .train-week-mark { color: var(--muted); }
-.train-week-day.planned .train-week-mark { border-color: var(--accent); color: var(--accent); }
-.train-week-inspect { display: flex; align-items: center; justify-content: space-between; gap: 12px; background: var(--bg); border: 1px solid var(--line); border-radius: 13px; padding: 12px; }
-.train-week-inspect-copy { min-width: 0; display: grid; gap: 4px; }
-.train-week-inspect strong { font-size: 14px; overflow-wrap: anywhere; }
-.train-week-inspect .meta { margin: 0; }
-.train-week-inspect > button { flex-shrink: 0; }
-@media (max-width: 380px) {
-  .train-week-inspect { align-items: stretch; flex-direction: column; }
-  .train-week-inspect > button { align-self: flex-start; }
+/* Per-day ring: how much of that day's workout was logged; the mark says what kind of day it is. */
+.train-day-ring { width: 28px; height: 28px; display: block; }
+.train-day-ring svg { width: 28px; height: 28px; display: block; overflow: visible; }
+.day-ring-track { fill: none; stroke: var(--line); stroke-width: 2.6; }
+.day-ring-fill { fill: none; stroke: var(--good); stroke-width: 2.8; stroke-linecap: round; }
+.day-ring-mark { fill: none; stroke: currentColor; stroke-width: 2.1; stroke-linecap: round; stroke-linejoin: round; }
+.train-week-day.done .day-ring-mark { stroke: var(--good); stroke-width: 2.4; }
+.train-week-day.paused .day-ring-fill { stroke: var(--warn); }
+.train-week-day.paused .day-ring-track { stroke: var(--warn-soft); }
+.train-week-day.paused .day-ring-mark { stroke: var(--warn); }
+.train-week-day.missed .day-ring-track { stroke: var(--warn); stroke-dasharray: 3 3.2; }
+.train-week-day.missed .day-ring-mark { stroke: var(--warn); stroke-width: 2.4; }
+.train-week-day.planned .day-ring-track { stroke: var(--accent); }
+.train-week-day.moved .day-ring-mark { stroke: var(--good); }
+.train-week-day.rest .day-ring-track { stroke: transparent; }
+.train-week-day.rest .day-ring-mark { stroke-width: 3.4; }
+/* The selected day's card */
+.train-day-slot { min-width: 0; }
+.train-day-panel { display: grid; gap: 10px; background: var(--bg); border: 1px solid var(--line); border-radius: 14px; padding: 13px; min-width: 0; }
+.train-day-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 10px; min-width: 0; }
+.train-day-title { min-width: 0; display: grid; gap: 3px; }
+.train-day-title .meta { margin: 0; }
+.train-day-title h3 { margin: 0; font-size: 17px; line-height: 1.25; overflow-wrap: anywhere; }
+.train-day-head .pill { flex-shrink: 0; white-space: nowrap; }
+.train-day-body { display: grid; gap: 7px; min-width: 0; }
+.train-day-body .meta, .train-day-note { margin: 0; }
+.train-day-note { font-size: var(--fs-sm, 12px); }
+.train-day-exercises { list-style: none; margin: 2px 0 0; padding: 0; display: grid; gap: 0; }
+.train-day-exercises li { display: flex; justify-content: space-between; align-items: baseline; gap: 10px; padding: 7px 0; border-top: 1px solid var(--line); font-size: var(--fs-md, 14px); font-weight: 650; min-width: 0; }
+.train-day-exercises li:first-child { border-top: 0; padding-top: 2px; }
+.train-day-exercises li > span:first-child { min-width: 0; overflow-wrap: anywhere; }
+.train-day-exercises li .meta { flex-shrink: 0; font-variant-numeric: tabular-nums; }
+.train-day-fineprint { font-size: var(--fs-xs, 11px); }
+.train-day-actions { display: grid; grid-template-columns: repeat(auto-fit, minmax(120px, 1fr)); gap: 8px; }
+.train-day-actions .btn { width: 100%; }
+.pill.accent { background: var(--accent-soft); color: var(--accent); }
+@keyframes strength-day-enter {
+  from { opacity: .35; transform: translateY(5px); }
+  to { opacity: 1; transform: none; }
 }
+.train-day-panel.train-day-enter { animation: strength-day-enter .22s ease-out both; }
 @media (prefers-reduced-motion: reduce) {
-  .train-week-day,.train-week-ring-fill { transition: none; }
+  .train-week-day, .train-week-ring-fill { transition: none; }
+  .train-day-panel.train-day-enter { animation: none; }
 }
 
 /* v2.17.0 — responsive live workout feedback. Visual only; no state or layout changes. */
@@ -3394,4 +3424,163 @@ html:not([data-theme="dark"]) .only-dark {
   .set-entry.set-just-reopened .set-row,
   .set-entry.set-just-logged .done-btn,
   .exercise-card.exercise-just-finished .exercise-top { animation: none; }
+}
+
+/* v2.18.0 — fluid touch: press feedback, pop-ups that slide up from the bottom on phones, the in-app
+   confirm sheet and the workout summary. Visual only; nothing here changes saved data. */
+html[data-theme="dark"] .pill.accent { background: var(--accent-soft); color: var(--accent); }
+
+/* Press feedback: buttons give a little under your finger, like a native app. */
+.btn,
+.icon-btn,
+.status-btn,
+.nav-btn,
+.done-btn,
+.tab,
+.seg button,
+.unit-toggle,
+.live-jump,
+.exercise-collapsed-btn,
+.check-chip span {
+  -webkit-tap-highlight-color: transparent;
+  transition: transform .12s ease, background-color .15s ease, border-color .15s ease, color .15s ease, filter .15s ease;
+}
+.btn:active:not(:disabled),
+.icon-btn:active:not(:disabled),
+.status-btn:active:not(:disabled),
+.tab:active,
+.seg button:active,
+.unit-toggle:active,
+.live-jump:active { transform: scale(.97); }
+.btn.primary:active:not(:disabled),
+.btn.danger:active:not(:disabled),
+.btn.secondary:active:not(:disabled) { filter: brightness(.93); }
+.btn.ghost:active:not(:disabled),
+.icon-btn:active:not(:disabled) { background: var(--bg); }
+.done-btn:active { transform: scale(.88); }
+.exercise-collapsed-btn:active { transform: scale(.985); }
+.nav-btn .nav-icon { transition: transform .14s ease; }
+.nav-btn:active .nav-icon { transform: scale(.86); }
+.nav-btn:active { background: var(--accent-soft); }
+button.workout-library-row {
+  appearance: none;
+  -webkit-appearance: none;
+  width: 100%;
+  font: inherit;
+  color: inherit;
+  text-align: left;
+  background: none;
+  border: 0;
+  border-top: 1px solid var(--line);
+  border-radius: 0;
+  cursor: pointer;
+  -webkit-tap-highlight-color: transparent;
+}
+.list > button.workout-library-row:first-child { border-top: 0; }
+
+/* Paused workout: one compact row instead of a big card. */
+.unfinished-row { display: flex; align-items: center; justify-content: space-between; gap: 10px 12px; flex-wrap: wrap; }
+.unfinished-copy { min-width: 0; flex: 1 1 170px; display: grid; gap: 2px; }
+.unfinished-copy .eyebrow { margin: 0; color: var(--warn); }
+.unfinished-copy strong { font-size: 16px; line-height: 1.3; overflow-wrap: anywhere; }
+.unfinished-copy .meta { margin: 0; }
+.unfinished-actions { display: flex; gap: 8px; flex: 0 0 auto; }
+@media (max-width: 380px) {
+  .unfinished-actions { flex: 1 1 100%; }
+  .unfinished-actions .btn { flex: 1; }
+}
+
+/* Pop-ups: a soft pop on wide screens; on phones they slide up from the bottom as sheets. */
+@keyframes strength-pop-in {
+  from { opacity: 0; transform: translateY(10px) scale(.98); }
+  to { opacity: 1; transform: none; }
+}
+@keyframes strength-sheet-up {
+  from { transform: translateY(100%); }
+  to { transform: translateY(0); }
+}
+@keyframes strength-fade-in {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+.modal[open] { animation: strength-pop-in .2s ease-out; }
+.modal[open]::backdrop { animation: strength-fade-in .2s ease-out; }
+html[data-theme="dark"] .modal { background: transparent; }
+/* The card scrolls itself; letting the dialog clip it cut its shadow off in a hard line. */
+.modal { overflow: visible; }
+.modal-body { overscroll-behavior: contain; }
+.modal-body:has(+ .modal-actions:empty) { padding-bottom: calc(16px + env(safe-area-inset-bottom)); }
+
+/* The in-app confirm (replaces the browser's confirm box). */
+.confirm-sheet { width: min(420px, calc(100% - 24px)); }
+.confirm-card { padding: 18px 16px 16px; display: grid; gap: 16px; }
+.confirm-copy h2 { font-size: 18px; line-height: 1.3; margin: 0; overflow-wrap: anywhere; }
+.confirm-message { margin-top: 7px; color: var(--muted); font-size: 14px; line-height: 1.45; display: grid; gap: 8px; overflow-wrap: anywhere; }
+.confirm-message p { margin: 0; }
+.confirm-message:empty { display: none; }
+.confirm-actions { display: flex; flex-direction: row-reverse; gap: 8px; }
+.confirm-actions .btn { flex: 1; }
+
+@media (max-width: 620px) {
+  .modal,
+  .confirm-sheet {
+    width: 100%;
+    max-width: 100%;
+    margin: auto 0 var(--kb, 0px);
+    max-height: calc(100% - var(--kb, 0px) - 8px);
+  }
+  .modal-card {
+    border-radius: 20px 20px 0 0;
+    max-height: min(88vh, calc(100vh - var(--kb, 0px) - 8px));
+  }
+  .modal[open] { animation: strength-sheet-up .3s cubic-bezier(.2,.85,.25,1); }
+  .confirm-card { padding: 20px 16px calc(14px + env(safe-area-inset-bottom)); }
+  .confirm-actions { flex-direction: column; }
+  .confirm-actions .btn { min-height: 48px; }
+}
+
+/* Workout summary, shown once after finishing a live workout. */
+.workout-summary { display: grid; gap: 14px; }
+.summary-week { display: flex; align-items: center; gap: 14px; padding: 12px 14px; border-radius: 16px; background: var(--good-soft); }
+.summary-week p { margin: 0; font-size: 14px; font-weight: 700; line-height: 1.4; color: var(--text); }
+.summary-ring { position: relative; flex: 0 0 72px; width: 72px; height: 72px; display: grid; place-items: center; }
+.summary-ring svg { width: 72px; height: 72px; overflow: visible; }
+.summary-ring circle { fill: none; stroke-width: 5.5; }
+.summary-ring-track { stroke: rgba(15, 118, 110, 0.16); }
+.summary-ring-fill { stroke: var(--good); stroke-linecap: round; }
+.summary-ring > span { position: absolute; display: grid; justify-items: center; line-height: 1.05; }
+.summary-ring strong { font-size: 18px; font-variant-numeric: tabular-nums; }
+.summary-ring small { font-size: 10px; font-weight: 700; color: var(--muted); text-transform: uppercase; letter-spacing: .04em; }
+.summary-check { flex: 0 0 56px; width: 56px; height: 56px; border-radius: 50%; display: grid; place-items: center; background: var(--good); color: #fff; font-size: 26px; font-weight: 800; }
+html[data-theme="dark"] .summary-check { color: #0b1120; }
+html[data-theme="dark"] .summary-ring-track { stroke: rgba(94, 234, 212, 0.18); }
+.summary-stats { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 8px; }
+.summary-stats > div { border: 1px solid var(--line); border-radius: 13px; padding: 10px 9px; display: grid; gap: 2px; min-width: 0; align-content: start; }
+.summary-stats .meta { margin: 0; font-size: 11px; }
+.summary-stats strong { font-size: 19px; line-height: 1.15; font-variant-numeric: tabular-nums; overflow-wrap: anywhere; }
+.summary-stats small { font-size: 11px; }
+.summary-prs { display: grid; }
+.summary-pr { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 6px 10px; padding: 9px 0; border-top: 1px solid var(--line); }
+.summary-pr:first-child { border-top: 0; padding-top: 0; }
+.summary-pr strong { flex: 1 1 130px; min-width: 0; font-size: 14px; overflow-wrap: anywhere; }
+.summary-pr .pill { flex-shrink: 0; }
+.summary-prs > .meta { margin: 6px 0 0; }
+@media (max-width: 440px) {
+  .summary-stats { grid-template-columns: 1fr 1fr; }
+}
+@keyframes strength-summary-pop {
+  0% { opacity: 0; transform: scale(.72); }
+  70% { opacity: 1; transform: scale(1.05); }
+  100% { transform: scale(1); }
+}
+.summary-ring,
+.summary-check { animation: strength-summary-pop .5s ease-out .08s both; }
+
+@media (prefers-reduced-motion: reduce) {
+  .btn, .icon-btn, .status-btn, .nav-btn, .done-btn, .tab, .seg button, .unit-toggle, .live-jump,
+  .exercise-collapsed-btn, .check-chip span, .nav-btn .nav-icon { transition: none; }
+  .btn:active:not(:disabled), .icon-btn:active:not(:disabled), .status-btn:active:not(:disabled), .tab:active,
+  .seg button:active, .unit-toggle:active, .live-jump:active, .done-btn:active, .exercise-collapsed-btn:active,
+  .nav-btn:active .nav-icon { transform: none; }
+  .modal[open], .modal[open]::backdrop, .summary-ring, .summary-check { animation: none; }
 }

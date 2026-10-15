@@ -1,3 +1,45 @@
+## v2.18.0 — A Train screen that flows, in-app confirms and a workout summary
+
+Train
+- **One Week card instead of four.** The program banner, the Today card, the training-week card and "Still to do this week" are now one card: the program's name, *This week* with a ring of planned sessions done (2/5), the seven days, and the chosen day's card underneath.
+- **Each day has its own small ring** showing how much of that day's workout was logged. Shortened and paused workouts show a part-filled ring. Marks: ✓ done, pause, − skipped, ! missed (dashed amber ring), → done on another day, empty ring planned, dot rest.
+- **Missed days show in the week.** A planned day earlier this week with nothing logged is marked missed; its card offers *View workout* to catch it up today, with the 2-day muscle check. A session you did on a different day than planned shows as done on that day instead of missed.
+- **The day's card fits the day**: today's plan with its exercises, *View workout* and *Mark skipped*; a logged day with sets, time and PRs; a paused workout with *Resume* and *Discard*; a future day with *Preview*. Tapping a day swaps only this card, so the page doesn't jump.
+- Starting a workout from any day's card still records it for today. Tapping a day never creates, moves or re-dates a workout.
+- A paused workout is now a compact row at the top with *Resume* and *Discard*.
+- The *Weekly progress* setting shows or hides the week ring and count.
+
+Confirms
+- **The browser's confirm boxes are gone.** Every question (22 of them: delete, discard, mark skipped, reset, import, undo import, typo check, kg/lb fix, finishing below 90%…) is now an in-app sheet with clear buttons such as *Delete*, *Keep it* / *Put back* and *Log it anyway* / *Fix it*. Tap outside it to cancel.
+- Two questions never overlap: a second one waits until the first is answered.
+- Typo check: *Fix it* puts the cursor back in the box. Changing a logged set to an odd number keeps it and asks; *Put back* restores what was there.
+
+Finishing a workout
+- **A summary when you finish a live workout**: duration, sets logged out of planned, volume, PRs by exercise, and the week ring filling up. *Done* goes back to Train with the day ticked; *See record* opens it in History. Saving an edited old workout still goes back to History.
+- The rest timer stops when you finish.
+
+Feel
+- Buttons, tabs, the bottom bar and ✓ press in slightly when tapped.
+- On phones, pop-ups slide up from the bottom as sheets and stay above the keyboard while you type; on wider screens they pop in. Their shadow is no longer cut off.
+- Reduce Motion turns all of it off.
+
+No change to how your data is stored, to backups or to imports.
+
+## v2.17.0 — Live workout feedback
+
+- Ticking a set gives a brief green flash on the row and the ✓; reopening it a brief blue one.
+- When every working set of an exercise is logged, the card shows **✓ All sets logged** and a short message appears (a PR message takes priority).
+- The workout progress bar slides to its new value instead of jumping.
+- None of this happens when editing an old workout, and Reduce Motion turns it off.
+- Logging itself is unchanged: the typo check, saving, progress, rest timer, scroll position and next-set focus work as before.
+
+## v2.16.0 — The training week on Train
+
+- Train shows the current week as seven days (following your Monday/Sunday week start), with what was logged on each: complete, shortened, skipped, paused or planned.
+- Tap a day to see its workout and open the record, resume it, or preview the current program's session for that weekday.
+- A ring shows how many of the week's scheduled sessions are done. Extra workouts don't inflate it.
+- Previewing another day never backdates a workout: starting it records it for today.
+
 ## v2.15.0 — A more realistic body map
 
 Progress → Muscles
