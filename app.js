@@ -23,7 +23,7 @@
     DB_STORE = "kv";
   const PRE_UPGRADE_DAYS = 30;
   const VERSION = 3;
-  const APP_VERSION = "2.18.0"; // Bump together with VERSION in sw.js.
+  const APP_VERSION = "2.19.0"; // Bump together with VERSION in sw.js.
   const trackingTypes = [
     ["weight_reps", "Weight + reps"],
     ["bodyweight_reps", "Bodyweight + reps"],
@@ -491,7 +491,12 @@
       if (mq.addEventListener) mq.addEventListener("change", onThemeChange);
       else if (mq.addListener) mq.addListener(onThemeChange);
     }
-    document.querySelectorAll(".nav-btn").forEach((b) => b.addEventListener("click", () => navigate(b.dataset.view)));
+    document.querySelectorAll(".nav-btn").forEach((b) =>
+      b.addEventListener("click", () => {
+        if (b.dataset.view !== activeView) playTapSound("tick");
+        navigate(b.dataset.view);
+      }),
+    );
     byId("cancelTimer").addEventListener("click", stopRestTimer);
     byId("restMinusBtn").addEventListener("click", () => adjustRestTimer(-30));
     byId("restPlusBtn").addEventListener("click", () => adjustRestTimer(30));
@@ -570,6 +575,7 @@
         showWeeklyProgress: true,
         trainMetrics: ["weight", "waist"],
         restSound: true,
+        tapSounds: false,
         keepAwake: true,
         activeProgramId: p.id,
         visibleBodyFields: ["weight", "waist"],
@@ -1104,6 +1110,7 @@
       trainPreviewDayId = null;
     }
     activeView = v;
+    enteredScreen = ""; // arriving at a screen: its bars fill once
     document.querySelectorAll(".nav-btn").forEach((b) => {
       b.classList.toggle("active", b.dataset.view === v);
       if (b.dataset.view === v) b.setAttribute("aria-current", "page");
@@ -1124,6 +1131,64 @@
     else if (activeView === "history") renderHistory();
     else if (activeView === "progress") renderProgress();
     else renderMore();
+  }
+  // v2.19: bars and rings fill up from empty when a screen opens. Only on arriving at a screen (or a Progress
+  // tab), never on the redraws that follow a change, so editing doesn't make everything bounce. Bars further
+  // down the page wait at empty and fill when they scroll into view.
+  let enteredScreen = "",
+    barWatcher = null;
+  const pendingFills = new Map(); // element → its paused fill animation
+  function motionAllowed() {
+    return !!Element.prototype.animate && !window.matchMedia?.("(prefers-reduced-motion: reduce)").matches;
+  }
+  function screenEnter(key) {
+    if (key === enteredScreen) return;
+    enteredScreen = key;
+    barWatcher?.disconnect();
+    pendingFills.clear();
+    fillBars(view);
+  }
+  function fillBars(root) {
+    if (!root || !motionAllowed()) return;
+    const ease = "cubic-bezier(.2,.8,.2,1)",
+      items = [];
+    root.querySelectorAll(".bar > span, .track-fill").forEach((el) => {
+      const w = el.style.width;
+      if (w && parseFloat(w) > 0) items.push([el, [{ width: "0%" }, { width: w }], 650]);
+    });
+    root.querySelectorAll(".train-week-ring-fill, .day-ring-fill").forEach((el) => {
+      const dash = el.getAttribute("stroke-dasharray");
+      if (dash && parseFloat(dash) > 0) items.push([el, [{ strokeDasharray: "0 100" }, { strokeDasharray: dash }], 700]);
+    });
+    if ("IntersectionObserver" in window && !barWatcher)
+      barWatcher = new IntersectionObserver(onBarsVisible, { threshold: 0.2 });
+    let n = 0;
+    items.forEach(([el, frames, duration]) => {
+      if (!el.getClientRects().length) return; // hidden (e.g. a folded list): shown as is when opened
+      const r = el.getBoundingClientRect(),
+        onScreen = r.bottom > 0 && r.top < window.innerHeight;
+      const anim = el.animate(frames, { duration, delay: onScreen ? Math.min(n++, 12) * 35 : 0, easing: ease, fill: "backwards" });
+      if (onScreen || !barWatcher) return;
+      anim.pause();
+      anim.currentTime = 0;
+      pendingFills.set(el, anim);
+      barWatcher.observe(el);
+    });
+    root.querySelectorAll(".track-plan").forEach((el) =>
+      el.animate([{ opacity: 0 }, { opacity: 1 }], { duration: 300, delay: 550, fill: "backwards" }),
+    );
+  }
+  function onBarsVisible(entries) {
+    let n = 0;
+    entries.forEach((e) => {
+      if (!e.isIntersecting) return;
+      const anim = pendingFills.get(e.target);
+      barWatcher.unobserve(e.target);
+      pendingFills.delete(e.target);
+      if (!anim) return;
+      anim.effect?.updateTiming?.({ delay: Math.min(n++, 8) * 35 });
+      anim.play();
+    });
   }
   function showToast(msg) {
     toast.textContent = msg;
@@ -1426,7 +1491,10 @@
     const stack = view.querySelector(".train-stack");
     stack.addEventListener("click", (e) => {
       const day = e.target.closest(".train-week-day");
-      if (day) return selectTrainDay(p, day.dataset.trainDate);
+      if (day) {
+        if (day.dataset.trainDate !== trainSelectedDate) playTapSound("tick");
+        return selectTrainDay(p, day.dataset.trainDate);
+      }
       const b = e.target.closest("[data-act]");
       if (!b || b.disabled) return;
       const { act, session, day: dayId } = b.dataset;
@@ -1440,6 +1508,7 @@
     keepRibbonDayVisible();
     wireBackupReminder();
     wireRevisionCard(renderTrain);
+    screenEnter("train");
   }
 
   function resetLiveUi() {
@@ -2068,8 +2137,11 @@
         const exerciseJustFinished = justCompleted && !wasExerciseComplete && itemComplete(item);
         touch();
         save();
+        const setPRs = justCompleted ? instantSetPRs(session, item, st) : [];
+        // Tap sounds (if on) for live workouts only, like the visual feedback.
+        if (!session.endTime) playTapSound(!justCompleted ? "reopen" : setPRs.length ? "pr" : exerciseJustFinished ? "exercise" : "log");
         if (justCompleted) {
-          const prs = instantSetPRs(session, item, st);
+          const prs = setPRs;
           if (prs.length) showToast(`★ ${ex.name}: ${prs.join(" + ")}`);
           else if (!session.endTime && exerciseJustFinished) showToast(`${ex.name}: all working sets logged.`);
           // No rest timer when editing a past workout.
@@ -2414,6 +2486,7 @@
       closeModal();
       openHistoryRecord(s.id);
     });
+    playTapSound("finish");
     // The week ring fills from where it was to where it is now.
     const fill = modalBody.querySelector(".summary-ring-fill");
     if (fill?.animate && counted && !window.matchMedia?.("(prefers-reduced-motion: reduce)").matches)
@@ -2581,21 +2654,79 @@
   }
   // iOS only plays sound after a tap has "unlocked" audio, so this runs on taps.
   function unlockAudio() {
-    if (state.settings.restSound === false) return;
+    if (!state || (state.settings.restSound === false && !state.settings.tapSounds)) return;
     try {
       const AC = window.AudioContext || window.webkitAudioContext;
       if (!AC) return;
       if (!audioCtx) {
-        if (navigator.audioSession) navigator.audioSession.type = "transient";
+        setAudioSession(state.settings.restSound === false ? "ambient" : "transient");
         audioCtx = new AC();
       }
       if (audioCtx.state === "suspended") audioCtx.resume();
+    } catch {}
+  }
+  // iOS (Safari 16.4+): "transient" for the rest alert, which should be heard; "ambient" for tap sounds, so they
+  // mix with your music instead of pausing it.
+  function setAudioSession(type) {
+    try {
+      if (navigator.audioSession && navigator.audioSession.type !== type) navigator.audioSession.type = type;
+    } catch {}
+  }
+  // ---------- Tap sounds (v2.19, off by default: More → Logging behavior) ----------
+  // Short tones made on the spot with Web Audio: no sound files, nothing to download.
+  // Each note: [frequency Hz, start s, length s, peak volume].
+  const TAP_SOUNDS = {
+    tick: [[1568, 0, 0.03, 0.03]],
+    log: [
+      [880, 0, 0.08, 0.08],
+      [1318.5, 0.055, 0.1, 0.07],
+    ],
+    reopen: [[587.3, 0, 0.09, 0.06]],
+    exercise: [
+      [1046.5, 0, 0.1, 0.07],
+      [1318.5, 0.07, 0.1, 0.07],
+      [1568, 0.14, 0.18, 0.07],
+    ],
+    pr: [
+      [1318.5, 0, 0.09, 0.06],
+      [1568, 0.06, 0.09, 0.06],
+      [1975.5, 0.12, 0.09, 0.06],
+      [2637, 0.18, 0.26, 0.05],
+    ],
+    finish: [
+      [523.25, 0, 0.7, 0.05],
+      [659.25, 0.06, 0.7, 0.05],
+      [783.99, 0.12, 0.7, 0.05],
+      [1046.5, 0.18, 0.8, 0.05],
+    ],
+  };
+  function playTapSound(name) {
+    const notes = TAP_SOUNDS[name];
+    if (!notes || !state?.settings?.tapSounds) return;
+    try {
+      unlockAudio();
+      if (!audioCtx) return;
+      setAudioSession("ambient");
+      const t0 = audioCtx.currentTime + 0.01;
+      notes.forEach(([freq, at, len, peak]) => {
+        const osc = audioCtx.createOscillator(),
+          gain = audioCtx.createGain();
+        osc.type = "sine";
+        osc.frequency.value = freq;
+        gain.gain.setValueAtTime(0.0001, t0 + at);
+        gain.gain.exponentialRampToValueAtTime(peak, t0 + at + 0.008);
+        gain.gain.exponentialRampToValueAtTime(0.0001, t0 + at + len);
+        osc.connect(gain).connect(audioCtx.destination);
+        osc.start(t0 + at);
+        osc.stop(t0 + at + len + 0.02);
+      });
     } catch {}
   }
   function restAlert() {
     if ("vibrate" in navigator) navigator.vibrate?.([120, 80, 120]);
     if (state.settings.restSound === false || !audioCtx) return;
     try {
+      setAudioSession("transient");
       const t0 = audioCtx.currentTime + 0.02;
       [0, 0.22, 0.44].forEach((offset, i) => {
         const osc = audioCtx.createOscillator(),
@@ -3524,6 +3655,7 @@
           `<button class="tab ${progressTab === id ? "active" : ""}" data-progress-tab="${id}" type="button" role="tab" aria-selected="${progressTab === id}">${n}</button>`,
       )
       .join("")}</div><div id="progressContent" class="stack">${progressTabHTML()}</div></div>`;
+    screenEnter(`progress:${progressTab}`);
     document.querySelectorAll("[data-progress-tab]").forEach((b) =>
       b.addEventListener("click", () => {
         progressTab = b.dataset.progressTab;
@@ -4794,6 +4926,7 @@
     });
     const panel = byId("muscleMapDetail");
     if (panel) panel.innerHTML = mapMuscle ? muscleMapPanelHTML(mapMuscle, stats) : "";
+    if (mapMuscle) fillBars(panel);
     wireMapPanel();
     if (mapMuscle) panel?.scrollIntoView({ block: "nearest", behavior: "smooth" });
   }
@@ -4874,7 +5007,7 @@
     view.innerHTML = `<div class="stack">
       <section class="card"><div class="section-title"><div><p class="eyebrow">Library</p><h2>Exercise Library</h2></div><button class="btn primary small-btn" id="moreAddExercise" type="button">+ Exercise</button></div><p class="meta">Create, edit, archive, and map exercises to muscles.</p><button class="btn ghost" id="moreOpenLibrary" type="button">Open library</button></section>
       <section class="card"><div class="section-title"><div><p class="eyebrow">Personalization</p><h2>Appearance & display</h2></div></div><div class="settings-list">${settingSeg("Theme", "themeSetting", [["system", "System"], ["light", "Light"], ["dark", "Dark"]], state.settings.theme || "system")}${settingSeg("Layout density", "densitySetting", [["comfortable", "Comfortable"], ["compact", "Compact"]], state.settings.density === "compact" ? "compact" : "comfortable")}${settingSeg("Units", "unitsSetting", [["kg", "kg"], ["lb", "lb"]], state.settings.units === "lb" ? "lb" : "kg")}${settingSeg("Week starts", "weekSetting", [["monday", "Monday"], ["sunday", "Sunday"]], state.settings.weekStarts === "sunday" ? "sunday" : "monday")}</div><p class="settings-subhead">Train dashboard</p><div class="settings-list">${settingSwitch("Weekly progress", { id: "weekProgressSetting" }, state.settings.showWeeklyProgress !== false)}${settingSwitch("Body weight", { cls: "train-metric-setting", value: "weight" }, trainMetrics.includes("weight"))}${settingSwitch("Waist", { cls: "train-metric-setting", value: "waist" }, trainMetrics.includes("waist"))}</div></section>
-      <section class="card"><div><p class="eyebrow">Training defaults</p><h2>Logging behavior</h2></div><div class="settings-list"><label class="setting-row"><span class="setting-label">Rest for new exercises<small>Seconds, 15–900</small></span><input id="defaultRestSetting" class="setting-input" type="number" inputmode="numeric" min="15" max="900" step="15" value="${Number.isFinite(Number(state.settings.defaultExerciseRest)) ? Number(state.settings.defaultExerciseRest) : 90}"></label>${settingSeg("Secondary muscle credit", "secondaryMultiplierSetting", [["0.25", "25%"], ["0.5", "50%"], ["0.75", "75%"]], String(Number(state.settings.secondaryMultiplier) || 0.5))}${settingSwitch("Track RIR", { id: "rirSetting" }, state.settings.trackRir)}${settingSwitch("Auto rest timer", { id: "restSetting" }, state.settings.autoRest)}${settingSwitch("Rest timer sound", { id: "restSoundSetting" }, state.settings.restSound !== false)}${settingSwitch("Keep screen on during workouts", { id: "keepAwakeSetting" }, state.settings.keepAwake !== false)}</div><p class="meta" style="margin-top:8px">Changes save automatically.</p></section>
+      <section class="card"><div><p class="eyebrow">Training defaults</p><h2>Logging behavior</h2></div><div class="settings-list"><label class="setting-row"><span class="setting-label">Rest for new exercises<small>Seconds, 15–900</small></span><input id="defaultRestSetting" class="setting-input" type="number" inputmode="numeric" min="15" max="900" step="15" value="${Number.isFinite(Number(state.settings.defaultExerciseRest)) ? Number(state.settings.defaultExerciseRest) : 90}"></label>${settingSeg("Secondary muscle credit", "secondaryMultiplierSetting", [["0.25", "25%"], ["0.5", "50%"], ["0.75", "75%"]], String(Number(state.settings.secondaryMultiplier) || 0.5))}${settingSwitch("Track RIR", { id: "rirSetting" }, state.settings.trackRir)}${settingSwitch("Auto rest timer", { id: "restSetting" }, state.settings.autoRest)}${settingSwitch("Rest timer sound", { id: "restSoundSetting" }, state.settings.restSound !== false)}${settingSwitch("Tap sounds<small>Soft sounds for logging sets, PRs and finishing. Off by default.</small>", { id: "tapSoundsSetting" }, !!state.settings.tapSounds)}${settingSwitch("Keep screen on during workouts", { id: "keepAwakeSetting" }, state.settings.keepAwake !== false)}</div><p class="meta" style="margin-top:8px">Changes save automatically.</p></section>
       <section class="card"><div class="section-title"><div><p class="eyebrow">Data health</p><h2>Integrity & backups</h2></div><span class="pill ${issues.length ? "warn" : "good"}">${issues.length ? `${issues.length} issue${issues.length > 1 ? "s" : ""}` : "Healthy"}</span></div><div class="data-health-grid"><div class="health-stat"><span>Schema</span><strong>v${VERSION}</strong></div><div class="health-stat"><span>Sessions</span><strong>${state.sessions.length}</strong></div><div class="health-stat"><span>Exercises</span><strong>${Object.keys(state.exercises).length}</strong></div><div class="health-stat"><span>Last backup</span><strong class="health-backup-value">${esc(lastBackup)}</strong></div><div class="health-stat"><span>Storage used</span><strong>${storageText()}</strong></div></div>${
         issues.length
           ? `<div class="stack health-preview">${issues
@@ -4901,6 +5034,9 @@
       state.settings.weekStarts = segValue("weekSetting");
       state.settings.trackRir = byId("rirSetting").checked;
       state.settings.restSound = byId("restSoundSetting").checked;
+      const soundsWereOn = !!state.settings.tapSounds;
+      state.settings.tapSounds = byId("tapSoundsSetting").checked;
+      if (state.settings.tapSounds && !soundsWereOn) playTapSound("log"); // a sample, so you hear what it's like
       state.settings.keepAwake = byId("keepAwakeSetting").checked;
       if (!state.settings.keepAwake) releaseWakeLock();
       state.settings.autoRest = byId("restSetting").checked;
@@ -4916,6 +5052,7 @@
       "#rirSetting",
       "#restSetting",
       "#restSoundSetting",
+      "#tapSoundsSetting",
       "#keepAwakeSetting",
       "#defaultRestSetting",
       "#weekProgressSetting",

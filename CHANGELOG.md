@@ -1,3 +1,18 @@
+## v2.19.0 — Tap sounds and bars that fill
+
+Tap sounds
+- **New setting, off by default:** More → Logging behavior → *Tap sounds*. Turning it on plays a sample.
+- During a live workout: a soft blip when you log a set, a lower one when you reopen it, a short chime when all of an exercise's sets are logged, a sparkle for a PR, and a warm chord with the workout summary.
+- A faint tick when you switch days on Train or tabs in the bottom bar.
+- The sounds are made in the app (no files) and are quiet. On recent iPhones they mix with your music instead of pausing it.
+- Editing an old workout makes no sounds. The rest-timer sound has its own setting, as before.
+
+Bars that fill
+- On Train, the week ring and each day's ring fill up when you open it.
+- On Progress, the muscle-set bars and goal bars grow from empty when you open a tab, one after another. Bars lower down fill when you scroll to them.
+- Tapping a muscle on the body map fills its target track.
+- It happens once per visit, not every time something changes on the screen. Reduce Motion turns it off.
+
 ## v2.18.0 — A Train screen that flows, in-app confirms and a workout summary
 
 Train
