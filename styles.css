@@ -3345,3 +3345,53 @@ html:not([data-theme="dark"]) .only-dark {
 @media (prefers-reduced-motion: reduce) {
   .train-week-day,.train-week-ring-fill { transition: none; }
 }
+
+/* v2.17.0 — responsive live workout feedback. Visual only; no state or layout changes. */
+.workout-head .progress-fill { transition: none; }
+.exercise-card.exercise-finished:not(.collapsed) {
+  border-top-color: var(--good);
+  border-right-color: var(--good);
+}
+.exercise-complete-note {
+  display: inline-flex;
+  align-items: center;
+  color: var(--good);
+  margin-left: 9px;
+  font-size: 12px;
+  font-weight: 800;
+}
+@keyframes strength-set-logged {
+  0% { background: var(--good-soft); box-shadow: inset 0 0 0 2px var(--good); }
+  100% { background: transparent; box-shadow: inset 0 0 0 0 transparent; }
+}
+@keyframes strength-set-reopened {
+  0% { background: var(--accent-soft); }
+  100% { background: transparent; }
+}
+@keyframes strength-done-check {
+  0% { transform: scale(.92); }
+  45% { transform: scale(1.08); }
+  100% { transform: scale(1); }
+}
+@keyframes strength-exercise-finished {
+  0% { background: var(--good-soft); }
+  100% { background: transparent; }
+}
+.set-entry.set-just-logged .set-row {
+  border-radius: 10px;
+  animation: strength-set-logged .48s ease-out both;
+}
+.set-entry.set-just-reopened .set-row {
+  border-radius: 10px;
+  animation: strength-set-reopened .36s ease-out both;
+}
+.set-entry.set-just-logged .done-btn { animation: strength-done-check .34s ease-out both; }
+.exercise-card.exercise-just-finished .exercise-top {
+  animation: strength-exercise-finished .65s ease-out both;
+}
+@media (prefers-reduced-motion: reduce) {
+  .set-entry.set-just-logged .set-row,
+  .set-entry.set-just-reopened .set-row,
+  .set-entry.set-just-logged .done-btn,
+  .exercise-card.exercise-just-finished .exercise-top { animation: none; }
+}
