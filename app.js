@@ -1217,6 +1217,15 @@
   }
 
   function wireTrainWeek(p) {
+    // Keep the active day visible when seven 44px touch targets scroll on 320px phones.
+    const ribbon = view.querySelector(".train-week-ribbon");
+    const activeDay = ribbon?.querySelector('.train-week-day[aria-pressed="true"]');
+    if (ribbon && activeDay) {
+      const track = ribbon.getBoundingClientRect();
+      const selected = activeDay.getBoundingClientRect();
+      if (selected.right > track.right) ribbon.scrollLeft += selected.right - track.right + 5;
+      else if (selected.left < track.left) ribbon.scrollLeft -= track.left - selected.left + 5;
+    }
     view.querySelectorAll(".train-week-day").forEach((button) =>
       button.addEventListener("click", () => {
         const before = button.getBoundingClientRect().top;
