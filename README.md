@@ -1,5 +1,13 @@
 # Strength OS — PWA
 
+## v2.16.0 — interactive training week
+
+Train now includes a seven-day ribbon for the **current week**, respecting the selected Monday/Sunday week start. Tapping a date updates a contextual detail card and shows actual logged sessions (complete, shortened, skipped or paused) alongside the *current* program's weekday pattern. A completion ring shows scheduled sessions fulfilled by a matching completed or shortened workout; extra/unscheduled sessions do not inflate that percentage. Tapping View record, Resume or Preview uses the existing screens. Previewing a different weekday never backdates a new workout: starting a workout still records it on today's date.
+
+The ribbon is **read-only**. It adds no settings or database fields and does not change workout data, plans, backup format, migration behavior or offline storage. It uses the existing theme and density tokens. On narrow phones the seven touch targets scroll horizontally; the current day is always indicated. The previous Train view and live workout workflow remain intact.
+
+**iPhone acceptance:** confirm both light and dark themes; Monday/Sunday week starts; days with planned, completed, shortened, skipped, paused and unscheduled sessions; return from preview/history; 320–390 px layout; VoiceOver focus and labels; offline launch; existing data and backups after updating.
+
 Strength OS is a local-first workout tracker built as a static Progressive Web App. It requires no backend, database service, app-store build, or workflow beyond GitHub Pages.
 
 ## What is included
