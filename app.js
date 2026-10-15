@@ -23,7 +23,7 @@
     DB_STORE = "kv";
   const PRE_UPGRADE_DAYS = 30;
   const VERSION = 3;
-  const APP_VERSION = "2.16.0"; // Bump together with VERSION in sw.js.
+  const APP_VERSION = "2.17.0"; // Bump together with VERSION in sw.js.
   const trackingTypes = [
     ["weight_reps", "Weight + reps"],
     ["bodyweight_reps", "Bodyweight + reps"],
@@ -1603,11 +1603,30 @@
     });
   }
   // Redraw only the header and the given exercise cards (much faster than the whole workout).
+  // A one-shot visual acknowledgement after the existing save-and-rerender path.
+  // It never changes workout state, starts audio, or moves the user's scroll position.
+  function flashSetFeedback(itemId, setId, wasLogged, exerciseJustFinished) {
+    const entry = view.querySelector(`[data-set-entry="${setId}"]`);
+    entry?.classList.add(wasLogged ? "set-just-logged" : "set-just-reopened");
+    if (exerciseJustFinished) byId(`exercise_${itemId}`)?.classList.add("exercise-just-finished");
+  }
   function refreshLive(s, itemIds, anchorSelector = null) {
     const head = view.querySelector(".workout-head");
     if (!head) return renderLiveSession(s, anchorSelector);
     const anchorBefore = anchorSelector ? document.querySelector(anchorSelector)?.getBoundingClientRect().top : null;
+    // Preserve the previous ring width so only the real change animates.
+    // The header is already recreated by this existing targeted renderer.
+    const previousWidth = head.querySelector(".progress-fill")?.style.width;
     head.outerHTML = liveHeadHTML(s);
+    const fill = view.querySelector(".workout-head .progress-fill");
+    const nextWidth = fill?.style.width;
+    if (!s.endTime && previousWidth != null && fill?.animate && previousWidth !== nextWidth &&
+        !(window.matchMedia?.("(prefers-reduced-motion: reduce)").matches)) {
+      fill.animate(
+        [{ width: previousWidth }, { width: nextWidth }],
+        { duration: 320, easing: "ease-out" },
+      );
+    }
     [...new Set(itemIds.filter(Boolean))].forEach((id) => {
       const idx = s.items.findIndex((i) => i.id === id),
         el = byId(`exercise_${id}`);
@@ -1649,7 +1668,7 @@
           .map((x) => (getExercise(x.exerciseId) || x.exerciseSnapshot).name)
       : [];
     const canFold = itemComplete(item);
-    return `<section class="card exercise-card ${item.supersetGroup ? "superset-card" : ""} ${usesLoad(ex) && exUnit(ex) === "lb" ? "unit-lb" : ""}" id="exercise_${item.id}"><div class="exercise-top"><div class="row start"><div><div class="wrap"><h3>${nameHTML(ex.name)}</h3><span class="pill priority-pill">${esc(item.target?.priority || "B")}</span>${sup}${prPill}</div>${focusHTML(ex)}<div class="target">${item.target?.sets || sets.length} × ${item.target?.min || ex.defaultMin}–${item.target?.max || ex.defaultMax} · ${restText(item.target?.rest || ex.defaultRest || 90)} rest</div><div class="meta">${muscleName(ex.primaryMuscle)} · ${esc(ex.equipment || "")} · ${trackingLabel(ex.trackingType)}</div>${supNames.length ? `<div class="meta superset-link">Linked with ${supNames.map(esc).join(" + ")}</div>` : ""}</div><div class="exercise-top-actions">${canFold ? `<button class="icon-btn toggle-item" data-item="${item.id}" type="button" aria-expanded="true" aria-label="Fold ${esc(ex.name)}">⌃</button>` : ""}<button class="icon-btn exercise-menu" data-item="${item.id}" type="button" aria-label="Options for ${esc(ex.name)}">•••</button></div></div></div><div class="exercise-body">
+    return `<section class="card exercise-card ${canFold ? "exercise-finished" : ""} ${item.supersetGroup ? "superset-card" : ""} ${usesLoad(ex) && exUnit(ex) === "lb" ? "unit-lb" : ""}" id="exercise_${item.id}"><div class="exercise-top"><div class="row start"><div><div class="wrap"><h3>${nameHTML(ex.name)}</h3><span class="pill priority-pill">${esc(item.target?.priority || "B")}</span>${sup}${prPill}</div>${focusHTML(ex)}<div class="target">${item.target?.sets || sets.length} × ${item.target?.min || ex.defaultMin}–${item.target?.max || ex.defaultMax} · ${restText(item.target?.rest || ex.defaultRest || 90)} rest${canFold ? '<span class="exercise-complete-note">✓ All sets logged</span>' : ""}</div><div class="meta">${muscleName(ex.primaryMuscle)} · ${esc(ex.equipment || "")} · ${trackingLabel(ex.trackingType)}</div>${supNames.length ? `<div class="meta superset-link">Linked with ${supNames.map(esc).join(" + ")}</div>` : ""}</div><div class="exercise-top-actions">${canFold ? `<button class="icon-btn toggle-item" data-item="${item.id}" type="button" aria-expanded="true" aria-label="Fold ${esc(ex.name)}">⌃</button>` : ""}<button class="icon-btn exercise-menu" data-item="${item.id}" type="button" aria-label="Options for ${esc(ex.name)}">•••</button></div></div></div><div class="exercise-body">
       ${ex.notes ? `<div class="note-box"><strong>Exercise note:</strong> ${esc(ex.notes)}</div>` : ""}
       <div class="previous">${previousHTML(prevEntry, ex, session)}<div><strong>Suggested:</strong> ${esc(suggestion)}</div></div>
       <div class="set-head"><span aria-hidden="true">Set</span><span aria-hidden="true">Type</span>${unitHeaderHTML(item, ex)}<span aria-hidden="true">${repHeader(ex)}</span><span aria-hidden="true">${state.settings.trackRir ? "RIR" : ""}</span><span aria-hidden="true">Done</span></div>
@@ -1917,13 +1936,16 @@
             return;
           }
         }
+        const wasExerciseComplete = itemComplete(item);
         st.complete = !st.complete;
         const justCompleted = st.complete;
+        const exerciseJustFinished = justCompleted && !wasExerciseComplete && itemComplete(item);
         touch();
         save();
         if (justCompleted) {
           const prs = instantSetPRs(session, item, st);
           if (prs.length) showToast(`★ ${ex.name}: ${prs.join(" + ")}`);
+          else if (!session.endTime && exerciseJustFinished) showToast(`${ex.name}: all working sets logged.`);
           // No rest timer when editing a past workout.
           if (!session.endTime && state.settings.autoRest && shouldStartRest(session, item, idx, st))
             startRestTimer(
@@ -1932,6 +1954,7 @@
             );
         }
         rerender(`[data-set-entry="${st.id}"]`);
+        if (!session.endTime) flashSetFeedback(item.id, st.id, justCompleted, exerciseJustFinished);
         // Move focus to the next open set (no scrolling, no keyboard) so the flow continues.
         const nextOpen = [...document.querySelectorAll(`#sets_${item.id} .done-btn:not(.done)`)][0];
         (nextOpen || document.querySelector(`[data-set-entry="${st.id}"] .done-btn`))?.focus({ preventScroll: true });
