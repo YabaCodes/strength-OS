@@ -23,7 +23,7 @@
     DB_STORE = "kv";
   const PRE_UPGRADE_DAYS = 30;
   const VERSION = 3;
-  const APP_VERSION = "2.17.0"; // Bump together with VERSION in sw.js.
+  const APP_VERSION = "2.18.0"; // Bump together with VERSION in sw.js.
   const trackingTypes = [
     ["weight_reps", "Weight + reps"],
     ["bodyweight_reps", "Bodyweight + reps"],
@@ -510,6 +510,9 @@
       modalActions.querySelector(".btn.primary")?.click();
     });
     byId("modalCloseBtn")?.addEventListener("click", closeModal);
+    watchKeyboardForSheets();
+    // iOS only shows :active (the press-down feedback on buttons) once a touch listener exists on the page.
+    document.addEventListener("touchstart", () => {}, { passive: true });
     view.addEventListener("click", (e) => {
       const b = e.target.closest(".show-more");
       if (!b) return;
@@ -987,12 +990,6 @@
   function activeProgram() {
     return state.programs[state.settings.activeProgramId] || Object.values(state.programs)[0] || null;
   }
-  function todayProgramDay() {
-    const p = activeProgram();
-    if (!p) return null;
-    const dow = dateObj(isoToday()).getDay();
-    return p.days.find((d) => Number(d.weekday) === dow) || null;
-  }
   function getSession(id) {
     return state.sessions.find((s) => s.id === id) || null;
   }
@@ -1136,122 +1133,268 @@
   }
 
   // ---------- TRAIN ----------
-  function trainWeekHTML(p, week) {
-    // UI selection is transient: never create sessions or change their historical dates.
+  // v2.18: one Week card driven by the selected day. Tapping a day only changes what the card shows; it never
+  // creates, moves or re-dates a workout. Starting a workout from any day's card always records it for today.
+  const DONE_STATUSES = ["complete", "shortened"];
+  // This week in the active program: planned days that have a complete or shortened workout anywhere this week.
+  function trainWeekStats(p = activeProgram()) {
+    const start = startOfWeek(isoToday()),
+      end = addDays(start, 6);
+    const done = state.sessions.filter((s) => s.date >= start && s.date <= end && DONE_STATUSES.includes(s.status));
+    const days = (p?.days || []).filter((d) => Number(d.weekday) >= 0);
+    const fulfilled = days.filter((d) => done.some((s) => s.programDayId === d.id)).length;
+    return { scheduled: days.length, fulfilled, logged: done.length };
+  }
+  // PRs counted once per exercise and kind (three sets at a new best are one Rep PR, not three).
+  function distinctPRCount(prs) {
+    return new Set(prs.map((x) => `${x.exerciseId}|${x.type}`)).size;
+  }
+  function sessionSetCount(s) {
+    return s.items.reduce((n, i) => n + workingSets(i).length, 0);
+  }
+  // Everything the week shows for one date.
+  function trainDayInfo(p, date) {
     const today = isoToday();
-    const start = startOfWeek(today);
+    const logs = state.sessions.filter((s) => s.date === date && s.id !== state.currentWorkoutId);
+    const recorded = logs
+      .filter((s) => DONE_STATUSES.includes(s.status))
+      .sort((a, b) => (b.endTime || b.startTime || 0) - (a.endTime || a.startTime || 0));
+    const paused = logs.find((s) => s.status === "in_progress") || null;
+    const skipped = logs.find((s) => s.status === "skipped") || null;
+    const plans = (p?.days || []).filter((d) => Number(d.weekday) === dateObj(date).getDay());
+    // A planned day that was trained (or skipped) on another day this week isn't missed.
+    let elsewhere = null;
+    if (!recorded.length && !paused && !skipped && plans.length && date < today) {
+      const start = startOfWeek(today);
+      elsewhere =
+        state.sessions.find(
+          (s) =>
+            s.date !== date &&
+            s.date >= start &&
+            s.date <= today &&
+            plans.some((d) => d.id === s.programDayId) &&
+            [...DONE_STATUSES, "skipped", "in_progress"].includes(s.status),
+        ) || null;
+    }
+    const kind = recorded.length
+      ? "done"
+      : paused
+        ? "paused"
+        : skipped
+          ? "skipped"
+          : elsewhere
+            ? "moved"
+            : plans.length
+              ? date < today
+                ? "missed"
+                : "planned"
+              : "rest";
+    // Ring = sets logged out of the sets in those workouts (shortened and paused days show a part-filled ring).
+    const ringOf = (list) => {
+      const logged = list.reduce((n, s) => n + sessionSetCount(s), 0),
+        total = list.reduce((n, s) => n + s.items.reduce((m, i) => m + allWorkingSets(i).length, 0), 0);
+      return total ? Math.min(100, Math.round((logged / total) * 100)) : logged ? 100 : 0;
+    };
+    const ring = kind === "done" ? Math.max(ringOf(recorded), 8) : kind === "paused" ? ringOf([paused]) : 0;
+    return { date, today, isToday: date === today, kind, recorded, paused, skipped, plans, elsewhere, ring };
+  }
+  const DAY_KIND_NAME = {
+    done: "Workout logged",
+    paused: "Workout paused",
+    skipped: "Marked skipped",
+    moved: "Done on another day",
+    missed: "Missed",
+    planned: "Planned",
+    rest: "Rest day",
+  };
+  // A small ring for each day, with a mark drawn as lines so it looks the same on every phone.
+  function dayRingSVG(kind, pct) {
+    const mark = {
+      done: `<path d="M9.6 14.3l3 3 5.9-6.4"/>`,
+      paused: `<path d="M12 10.6v6.8M16 10.6v6.8"/>`,
+      skipped: `<path d="M10.2 14h7.6"/>`,
+      moved: `<path d="M9.8 14h7.4M14.6 11l3 3-3 3"/>`,
+      missed: `<path d="M14 9.6v5.2M14 18.3v.1"/>`,
+      planned: "",
+      rest: `<path d="M14 14h.01"/>`,
+    }[kind];
+    return `<svg viewBox="0 0 28 28" aria-hidden="true"><circle class="day-ring-track" cx="14" cy="14" r="11.5"/>${pct > 0 ? `<circle class="day-ring-fill" cx="14" cy="14" r="11.5" pathLength="100" stroke-dasharray="${pct} 100" transform="rotate(-90 14 14)"/>` : ""}<g class="day-ring-mark">${mark}</g></svg>`;
+  }
+  function trainRibbonDayHTML(info) {
+    const sel = info.date === trainSelectedDate;
+    const label = `${fmtDate(info.date, { weekday: "long", month: "short", day: "numeric" })}${info.isToday ? ", today" : ""}: ${DAY_KIND_NAME[info.kind]}`;
+    return `<button type="button" class="train-week-day ${info.kind}${sel ? " selected" : ""}${info.isToday ? " today" : ""}" data-train-date="${info.date}" aria-pressed="${sel}" aria-label="${esc(label)}">
+        <span class="train-week-dayname">${esc(fmtDate(info.date, { weekday: "short" }))}</span>
+        <span class="train-day-ring">${dayRingSVG(info.kind, info.ring)}</span>
+        <span class="train-week-number">${dateObj(info.date).getDate()}</span>
+      </button>`;
+  }
+  function trainPlanListHTML(day, max = 4) {
+    const rows = day.items
+      .slice(0, max)
+      .map((x) => {
+        const ex = getExercise(x.exerciseId);
+        return `<li><span>${esc(ex?.name || "Missing exercise")}</span><span class="meta">${x.sets} × ${x.min}–${x.max}</span></li>`;
+      })
+      .join("");
+    const sets = day.items.reduce((a, x) => a + num(x.sets), 0);
+    return `<ul class="train-day-exercises">${rows}</ul><p class="meta">${day.items.length > max ? `+ ${day.items.length - max} more · ` : ""}${day.items.length} exercise${day.items.length === 1 ? "" : "s"} · ${sets} sets</p>`;
+  }
+  // The 2-day muscle check, for a session you'd be training today.
+  function trainRestLineHTML(day) {
+    const note = restNote(day);
+    return note ? `<p class="train-day-note rest-warn">${esc(note)}</p>` : `<p class="train-day-note rest-ok">Muscles rested</p>`;
+  }
+  function trainDayPanelHTML(info) {
+    const { kind, plans, recorded, paused, skipped, elsewhere, isToday } = info;
+    const plan = plans[0] || null;
+    const planTitle = plans.map((d) => d.name).join(" · ");
+    const weekday = weekdayName(dateObj(info.date).getDay());
+    const act = (label, a, cls = "ghost", data = "") => `<button type="button" class="btn ${cls}" data-act="${a}" ${data}>${esc(label)}</button>`;
+    let title = "",
+      pill = "",
+      body = "",
+      actions = "";
+    if (kind === "done") {
+      const s = recorded[0],
+        allComplete = recorded.every((x) => x.status === "complete");
+      title = recorded.length === 1 ? s.name : `${recorded.length} workouts`;
+      pill = allComplete ? `<span class="pill good">Done</span>` : `<span class="pill warn">${recorded.length === 1 ? "Shortened" : "Done"}</span>`;
+      body = recorded
+        .map((x) => {
+          const prs = distinctPRCount(sessionPRs(x)),
+            dur = x.startTime && x.endTime ? durationText(sessionDuration(x)) : "";
+          return `<p class="meta">${recorded.length > 1 ? `<strong>${esc(x.name)}</strong> · ` : ""}${sessionSetCount(x)} working sets${dur ? ` · ${dur}` : ""}${prs ? ` · ★ ${prs} PR${prs === 1 ? "" : "s"}` : ""}${recorded.length > 1 ? ` · ${statusLabel(x.status)}` : ""}</p>`;
+        })
+        .join("");
+      actions = act("View record", "record", isToday ? "primary" : "ghost", `data-session="${esc(s.id)}"`);
+      if (isToday && plan)
+        actions += act(recorded.some((x) => x.programDayId === plan.id) ? "Train again" : "Today's plan", "preview", "ghost", `data-day="${esc(plan.id)}"`);
+    } else if (kind === "paused") {
+      const total = paused.items.reduce((n, i) => n + allWorkingSets(i).length, 0);
+      title = paused.name;
+      pill = `<span class="pill warn">Paused</span>`;
+      body = `<p class="meta">${sessionSetCount(paused)} of ${total} sets logged. Pick up where you left off.</p>`;
+      actions = act("Resume", "resume", "primary", `data-session="${esc(paused.id)}"`) + act("Discard", "discard", "ghost", `data-session="${esc(paused.id)}"`);
+    } else if (kind === "skipped") {
+      title = skipped.name;
+      pill = `<span class="pill neutral">Skipped</span>`;
+      body = `<p class="meta">Marked as skipped${isToday && plan ? ". You can still train if plans change." : "."}</p>`;
+      if (isToday && plan) actions = act("View workout", "preview", "ghost", `data-day="${esc(plan.id)}"`);
+    } else if (kind === "moved") {
+      const when = weekdayName(dateObj(elsewhere.date).getDay());
+      title = planTitle;
+      pill = `<span class="pill ${elsewhere.status === "in_progress" ? "warn" : elsewhere.status === "skipped" ? "neutral" : "good"}">${elsewhere.status === "in_progress" ? "Paused" : cap(elsewhere.status)} · ${esc(fmtDate(elsewhere.date, { weekday: "short" }))}</span>`;
+      body = `<p class="meta">${elsewhere.status === "in_progress" ? `Started on ${when} instead, and paused.` : elsewhere.status === "skipped" ? `Marked skipped on ${when}.` : `Done on ${when} instead.`}</p>`;
+      actions =
+        elsewhere.status === "in_progress"
+          ? act("Resume", "resume", "primary", `data-session="${esc(elsewhere.id)}"`)
+          : elsewhere.status === "skipped"
+            ? ""
+            : act("View record", "record", "ghost", `data-session="${esc(elsewhere.id)}"`);
+    } else if (kind === "missed") {
+      title = planTitle;
+      pill = `<span class="pill warn">Missed</span>`;
+      body = `<p class="meta">Not logged on ${weekday}. Catch it up today?</p>${trainRestLineHTML(plan)}${trainPlanListHTML(plan, 3)}`;
+      actions = act("View workout", "preview", "primary", `data-day="${esc(plan.id)}"`);
+      body += `<p class="meta train-day-fineprint">Starting it records it for today.</p>`;
+    } else if (kind === "planned" && isToday) {
+      title = planTitle;
+      pill = `<span class="pill accent">Today</span>`;
+      body = `${trainRestLineHTML(plan)}${trainPlanListHTML(plan)}`;
+      actions = act("View workout", "preview", "primary", `data-day="${esc(plan.id)}"`) + act("Mark skipped", "skip", "ghost", `data-day="${esc(plan.id)}"`);
+    } else if (kind === "planned") {
+      title = planTitle;
+      pill = `<span class="pill neutral">Planned</span>`;
+      body = trainPlanListHTML(plan);
+      actions = act("Preview", "preview", "ghost", `data-day="${esc(plan.id)}"`);
+      body += `<p class="meta train-day-fineprint">Starting it from here records it for today, not ${weekday}.</p>`;
+    } else {
+      title = isToday ? "Rest / flexible day" : "Rest day";
+      pill = `<span class="pill neutral">Rest</span>`;
+      body = isToday
+        ? `<p class="meta">Nothing planned today. Start an empty workout, or pick any session from the library below.</p>`
+        : `<p class="meta">${info.date < info.today ? "No workout logged, and none planned." : "Nothing planned in your current program."}</p>`;
+      if (isToday) actions = act("Empty workout", "empty", "ghost");
+    }
+    return `<div class="train-day-panel kind-${kind}">
+        <div class="train-day-head"><div class="train-day-title"><span class="meta">${esc(fmtDate(info.date, { weekday: "long", month: "short", day: "numeric" }))}${isToday ? " · Today" : ""}</span><h3>${nameHTML(title)}</h3></div>${pill}</div>
+        <div class="train-day-body">${body}</div>
+        ${actions ? `<div class="train-day-actions">${actions}</div>` : ""}
+      </div>`;
+  }
+  function trainWeekHTML(p) {
+    const today = isoToday(),
+      start = startOfWeek(today);
     const dates = Array.from({ length: 7 }, (_, i) => addDays(start, i));
     if (!dates.includes(trainSelectedDate)) trainSelectedDate = today;
-    const doneStatuses = ["complete", "shortened"];
-    const planned = dates.flatMap((date) =>
-      (p?.days || [])
-        .filter((day) => Number(day.weekday) === dateObj(date).getDay())
-        .map((day) => ({ date, day })),
-    );
-    const fulfilled = planned.filter(({ date, day }) =>
-      state.sessions.some((s) => s.date === date && s.programDayId === day.id && doneStatuses.includes(s.status)),
-    ).length;
-    const percent = planned.length ? Math.round((fulfilled / planned.length) * 100) : 0;
-    const ribbon = dates.map((date) => {
-      const sessions = state.sessions.filter((s) => s.date === date);
-      const plannedCount = planned.filter((x) => x.date === date).length;
-      const completed = sessions.some((s) => doneStatuses.includes(s.status));
-      const paused = !completed && sessions.some((s) => s.status === "in_progress");
-      const skipped = !completed && !paused && sessions.some((s) => s.status === "skipped");
-      const kind = completed ? "done" : paused ? "paused" : skipped ? "skipped" : plannedCount ? "planned" : "rest";
-      const kindName = { done: "Workout logged", paused: "Workout paused", skipped: "Marked skipped", planned: "On current program", rest: "No workout logged" }[kind];
-      const dateLabel = fmtDate(date, { weekday: "long", month: "short", day: "numeric" });
-      return `<button type="button" class="train-week-day ${kind}${date === trainSelectedDate ? " selected" : ""}${date === today ? " today" : ""}" data-train-date="${date}" aria-pressed="${date === trainSelectedDate}" aria-label="${esc(dateLabel)}: ${esc(kindName)}">
-        <span class="train-week-dayname">${esc(fmtDate(date, { weekday: "short" }))}</span>
-        <span class="train-week-mark" aria-hidden="true">${completed ? "✓" : paused ? "◐" : skipped ? "−" : plannedCount ? "○" : "·"}</span>
-        <span class="train-week-number">${dateObj(date).getDate()}</span>
-      </button>`;
-    }).join("");
-    const date = trainSelectedDate;
-    const logs = state.sessions.filter((s) => s.date === date);
-    const recorded = logs.filter((s) => doneStatuses.includes(s.status))
-      .sort((a, b) => (b.endTime || b.startTime || 0) - (a.endTime || a.startTime || 0));
-    const paused = logs.find((s) => s.status === "in_progress");
-    const skipped = logs.some((s) => s.status === "skipped");
-    const dayPlans = (p?.days || []).filter((d) => Number(d.weekday) === dateObj(date).getDay());
-    let title, description, action = "";
-    if (recorded.length) {
-      const sets = recorded.reduce((n, s) => n + s.items.reduce((m, item) => m + workingSets(item).length, 0), 0);
-      title = recorded.length === 1 ? recorded[0].name : `${recorded.length} workouts logged`;
-      description = `${recorded.length} completed or shortened session${recorded.length === 1 ? "" : "s"} · ${sets} working sets`;
-      action = `<button type="button" class="btn ghost small-btn" id="trainWeekRecordBtn" data-session="${esc(recorded[0].id)}">View record</button>`;
-    } else if (paused) {
-      title = paused.name;
-      description = "Workout in progress or paused. Resume where you left off.";
-      action = `<button type="button" class="btn primary small-btn" id="trainWeekResumeBtn" data-session="${esc(paused.id)}">Resume</button>`;
-    } else if (skipped) {
-      title = "Marked as skipped";
-      description = "No completed workout logged for this date.";
-    } else if (dayPlans.length) {
-      title = dayPlans.map((d) => d.name).join(" · ");
-      description = date === today
-        ? "Scheduled today in your current program."
-        : `Current program's ${weekdayName(dateObj(date).getDay())} plan. Previewing does not log a past or future workout.`;
-    } else {
-      title = "Recovery / flexible day";
-      description = "No workout logged on this date. Your current program has no scheduled session for this weekday.";
-    }
-    if (!recorded.length && !paused && dayPlans.length) {
-      action = `<button type="button" class="btn ghost small-btn" id="trainWeekPreviewBtn" data-day="${esc(dayPlans[0].id)}">Preview session</button>`;
-      if (skipped) description += " You can still preview the current program.";
-    }
-    return `<section class="card train-week-card" aria-label="This week's workouts">
-      <div class="train-week-top"><div><p class="eyebrow">This week</p><h2>Training overview</h2><p class="meta">${week.done} workout${week.done === 1 ? "" : "s"} logged · ${fulfilled}/${planned.length} scheduled sessions completed</p></div>
-        <div class="train-week-progress" aria-label="${percent}% of current program's scheduled sessions completed">
-          <svg viewBox="0 0 40 40" aria-hidden="true"><circle class="train-week-ring-track" cx="20" cy="20" r="16"/><circle class="train-week-ring-fill" cx="20" cy="20" r="16" pathLength="100" stroke-dasharray="${percent} 100" transform="rotate(-90 20 20)"/></svg>
-          <span>${planned.length ? `${percent}%` : "—"}</span>
-        </div>
+    const infos = dates.map((d) => trainDayInfo(p, d));
+    const stats = trainWeekStats(p),
+      showWeek = state.settings.showWeeklyProgress !== false;
+    const missed = infos.filter((x) => x.kind === "missed").length,
+      extra = Math.max(0, stats.logged - stats.fulfilled);
+    const pct = stats.scheduled ? Math.min(100, Math.round((stats.fulfilled / stats.scheduled) * 100)) : 0;
+    const range = `${fmtDate(start, { month: "short", day: "numeric" })} – ${fmtDate(addDays(start, 6), { month: "short", day: "numeric" })}`;
+    const line = !showWeek
+      ? range
+      : stats.scheduled
+        ? `${stats.fulfilled} of ${stats.scheduled} planned sessions done${missed ? ` · ${missed} missed` : ""}${extra ? ` · ${extra} extra` : ""}`
+        : `${stats.logged} workout${stats.logged === 1 ? "" : "s"} logged · ${range}`;
+    return `<section class="card train-week-card" aria-label="This week's training">
+      <div class="train-week-top"><div><p class="eyebrow">${nameHTML(p?.name || "No active program")}</p><h2>This week</h2><p class="meta">${line}</p></div>
+        ${
+          showWeek && stats.scheduled
+            ? `<div class="train-week-progress${pct >= 100 ? " full" : ""}" role="img" aria-label="${stats.fulfilled} of ${stats.scheduled} planned sessions done this week">
+          <svg viewBox="0 0 40 40" aria-hidden="true"><circle class="train-week-ring-track" cx="20" cy="20" r="16"/><circle class="train-week-ring-fill" cx="20" cy="20" r="16" pathLength="100" stroke-dasharray="${pct} 100" transform="rotate(-90 20 20)"/></svg>
+          <span>${stats.fulfilled}/${stats.scheduled}</span>
+        </div>`
+            : ""
+        }
       </div>
-      <div class="train-week-ribbon" role="group" aria-label="Select a day to inspect">${ribbon}</div>
-      <div class="train-week-inspect" aria-live="polite"><div class="train-week-inspect-copy">
-        <span class="meta">${esc(fmtDate(date, { weekday: "long", month: "short", day: "numeric" }))}${date === today ? " · Today" : ""}</span>
-        <strong>${esc(title)}</strong><p class="meta">${esc(description)}</p>
-        ${date !== today && action.includes("trainWeekPreviewBtn") ? `<p class="meta">If you start this program workout, it will be recorded for today—not the selected date.</p>` : ""}
-      </div>${action}</div>
+      <div class="train-week-ribbon" role="group" aria-label="Pick a day">${infos.map(trainRibbonDayHTML).join("")}</div>
+      <div class="train-day-slot" aria-live="polite">${trainDayPanelHTML(infos[dates.indexOf(trainSelectedDate)])}</div>
     </section>`;
   }
-
-  function wireTrainWeek(p) {
-    // Keep the active day visible when seven 44px touch targets scroll on 320px phones.
+  // Keep the chosen day in view when the seven 44px buttons scroll sideways on 320px phones.
+  function keepRibbonDayVisible() {
     const ribbon = view.querySelector(".train-week-ribbon");
     const activeDay = ribbon?.querySelector('.train-week-day[aria-pressed="true"]');
-    if (ribbon && activeDay) {
-      const track = ribbon.getBoundingClientRect();
-      const selected = activeDay.getBoundingClientRect();
-      if (selected.right > track.right) ribbon.scrollLeft += selected.right - track.right + 5;
-      else if (selected.left < track.left) ribbon.scrollLeft -= track.left - selected.left + 5;
-    }
-    view.querySelectorAll(".train-week-day").forEach((button) =>
-      button.addEventListener("click", () => {
-        const before = button.getBoundingClientRect().top;
-        trainSelectedDate = button.dataset.trainDate;
-        renderTrain();
-        const after = view.querySelector('.train-week-day[aria-pressed="true"]')?.getBoundingClientRect().top;
-        if (after != null) window.scrollBy(0, after - before);
-      }),
-    );
-    byId("trainWeekRecordBtn")?.addEventListener("click", (e) => openHistoryRecord(e.currentTarget.dataset.session));
-    byId("trainWeekResumeBtn")?.addEventListener("click", (e) => resumeSession(e.currentTarget.dataset.session));
-    byId("trainWeekPreviewBtn")?.addEventListener("click", (e) => {
-      if (p) openTrainPreview(p.id, e.currentTarget.dataset.day);
+    if (!ribbon || !activeDay) return;
+    const track = ribbon.getBoundingClientRect(),
+      selected = activeDay.getBoundingClientRect();
+    if (selected.right > track.right) ribbon.scrollLeft += selected.right - track.right + 5;
+    else if (selected.left < track.left) ribbon.scrollLeft -= track.left - selected.left + 5;
+  }
+  // Swap only the day card (no full redraw), so the page doesn't jump or flash.
+  function selectTrainDay(p, date) {
+    trainSelectedDate = date;
+    const card = view.querySelector(".train-week-card"),
+      slot = card?.querySelector(".train-day-slot");
+    if (!slot) return renderTrain();
+    card.querySelectorAll(".train-week-day").forEach((b) => {
+      const on = b.dataset.trainDate === date;
+      b.classList.toggle("selected", on);
+      b.setAttribute("aria-pressed", String(on));
     });
+    slot.innerHTML = trainDayPanelHTML(trainDayInfo(p, date));
+    slot.firstElementChild?.classList.add("train-day-enter");
+    keepRibbonDayVisible();
+  }
+  async function discardUnfinished(sessionId) {
+    if (!(await askConfirm("Discard this unfinished workout?", "Sets logged in it will be deleted.", { ok: "Discard", danger: true }))) return;
+    state.sessions = state.sessions.filter((x) => x.id !== sessionId);
+    save();
+    renderTrain();
+    showToast("Unfinished workout discarded.");
   }
 
   function renderTrain() {
     const live = liveSession();
     if (live) return renderLiveSession(live);
-    const p = activeProgram(),
-      d = todayProgramDay();
+    const p = activeProgram();
     const latestWeight = latestBody("weight"),
       avg7 = bodyAverage("weight", 7);
-    const week = weekSummary(isoToday()),
-      trainMetrics = Array.isArray(state.settings.trainMetrics) ? state.settings.trainMetrics : ["weight", "waist"],
-      showWeek = state.settings.showWeeklyProgress !== false;
+    const trainMetrics = Array.isArray(state.settings.trainMetrics) ? state.settings.trainMetrics : ["weight", "waist"];
     const trainMetricCards = [
       trainMetrics.includes("weight")
         ? `<div class="metric"><span class="meta">Body weight</span><strong>${latestWeight ? `${round1(unitWeight(latestWeight.weight))} ${weightUnit()}` : "—"}</strong><span class="small muted">7-day avg ${avg7 ? `${round1(unitWeight(avg7))} ${weightUnit()}` : "—"}</span></div>`
@@ -1272,58 +1415,31 @@
     const unfinished = state.sessions
       .filter((x) => x.status === "in_progress" && x.id !== state.currentWorkoutId)
       .sort((a, b) => b.date.localeCompare(a.date));
-    const doneToday = d
-      ? state.sessions
-          .filter((x) => x.date === isoToday() && x.programDayId === d.id && ["complete", "shortened", "skipped"].includes(x.status))
-          .sort((a, b) => (b.endTime || 0) - (a.endTime || 0))[0]
-      : null;
-    view.innerHTML = `<div class="stack">
-      <section class="card hero train-hero"><div class="row start"><div><p class="meta">Active program</p><h2>${nameHTML(p?.name || "No active program")}</h2><p class="meta">${d ? `Today · ${esc(d.name)}${doneToday ? ` · ${doneToday.status === "skipped" ? "skipped" : "done"}` : ""}` : "No scheduled session today"}</p></div>${showWeek ? `<span class="pill train-summary-badge">${week.done}/${week.scheduled} this week</span>` : ""}</div></section>
-      ${unfinished.map((u) => `<section class="card unfinished-card"><div class="row start"><div><p class="eyebrow">Unfinished workout</p><h2>${nameHTML(u.name)}</h2><p class="meta">${fmtDate(u.date)} · ${u.items.reduce((n, i) => n + workingSets(i).length, 0)} sets logged</p></div><span class="pill warn">Paused</span></div><div class="preview-actions" style="margin-top:12px"><button class="btn primary resume-session" data-session="${u.id}" type="button">Resume</button><button class="btn ghost discard-session" data-session="${u.id}" type="button">Discard</button></div></section>`).join("")}
-      ${trainWeekHTML(p, week)}
+    view.innerHTML = `<div class="stack train-stack">
+      ${unfinished.map((u) => `<section class="card unfinished-card"><div class="unfinished-row"><div class="unfinished-copy"><p class="eyebrow">Paused workout</p><strong>${nameHTML(u.name)}</strong><span class="meta">${fmtDate(u.date)} · ${sessionSetCount(u)} sets logged</span></div><div class="unfinished-actions"><button class="btn primary small-btn" data-act="resume" data-session="${esc(u.id)}" type="button">Resume</button><button class="btn ghost small-btn" data-act="discard" data-session="${esc(u.id)}" type="button">Discard</button></div></div></section>`).join("")}
+      ${trainWeekHTML(p)}
       ${revisionCardHTML("train")}
       ${backupReminderHTML()}
-      ${
-        d && doneToday
-          ? `<section class="card today-card done-today"><div class="section-title"><h2>${nameHTML(d.name)}</h2><span class="pill ${doneToday.status === "complete" ? "good" : doneToday.status === "shortened" ? "warn" : "neutral"}">${doneToday.status === "skipped" ? "Skipped today" : `Done · ${cap(doneToday.status)}`}</span></div><p class="meta" style="margin-top:6px">${doneToday.status === "skipped" ? "Marked as skipped. You can still train if plans change." : `${doneToday.items.reduce((n, i) => n + workingSets(i).length, 0)} working sets${sessionDuration(doneToday) ? ` · ${durationText(sessionDuration(doneToday))}` : ""}. Nice work.`}</p><div class="preview-actions" style="margin-top:12px">${doneToday.status === "skipped" ? `<button class="btn primary" id="viewTodayBtn" type="button">View workout</button>` : `<button class="btn primary" id="viewTodayRecordBtn" data-session="${doneToday.id}" type="button">View record</button><button class="btn ghost" id="viewTodayBtn" type="button">Train again</button>`}</div></section>`
-          : d
-          ? `<section class="card today-card"><div class="section-title"><h2>${nameHTML(d.name)}</h2><span class="meta">${d.items.length} exercises · ${d.items.reduce((a, x) => a + x.sets, 0)} sets</span></div>${restNote(d) ? `<p class="meta rest-warn" style="margin-top:4px">${esc(restNote(d))}</p>` : ""}<div class="list" style="margin-top:7px">${d.items
-              .slice(0, 4)
-              .map(
-                (x) =>
-                  `<div class="list-row"><div><strong>${esc(getExercise(x.exerciseId)?.name || "Missing exercise")}</strong>${focusHTML(getExercise(x.exerciseId))}<div class="meta">${x.sets} × ${x.min}–${x.max} · Priority ${x.priority}</div></div></div>`,
-              )
-              .join(
-                "",
-              )}${d.items.length > 4 ? `<div class="meta">+ ${d.items.length - 4} more exercises</div>` : ""}</div><div class="preview-actions" style="margin-top:12px"><button class="btn primary" id="viewTodayBtn" type="button">View workout</button><button class="btn ghost" id="skipTodayBtn" type="button">Mark skipped</button></div></section>`
-          : missedThisWeek(p).length
-            ? ""
-            : `<section class="card"><h2>Recovery / flexible day</h2><p class="muted">Start an empty workout or choose any program day if you want to train.</p></section>`
-      }
-      ${catchUpHTML(p)}
       ${trainMetricCards ? `<section class="grid-2 train-metrics">${trainMetricCards}</section>` : ""}
-      <section class="card library-card"><div class="section-title"><h2>Workout library</h2><button class="btn ghost small-btn" id="emptyWorkoutBtn" type="button">Empty workout</button></div><div class="list">${p?.days.map((day) => `<div class="list-row click-row preview-program-day workout-library-row" data-day="${day.id}"><div><strong>${esc(day.name)}</strong><div class="meta">${weekdayName(day.weekday)} · ${day.items.length} exercises</div></div><span class="row-chevron">›</span></div>`).join("") || `<p class="empty">Create a program first.</p>`}</div></section>
+      <section class="card library-card"><div class="section-title"><h2>Workout library</h2><button class="btn ghost small-btn" data-act="empty" type="button">Empty workout</button></div><div class="list">${p?.days.map((day) => `<button type="button" class="list-row click-row workout-library-row" data-act="preview" data-day="${esc(day.id)}"><div><strong>${esc(day.name)}</strong><div class="meta">${weekdayName(day.weekday)} · ${day.items.length} exercises</div></div><span class="row-chevron" aria-hidden="true">›</span></button>`).join("") || `<p class="empty">Create a program first.</p>`}</div></section>
     </div>`;
-    byId("viewTodayBtn")?.addEventListener("click", () => openTrainPreview(p.id, d.id));
-    byId("skipTodayBtn")?.addEventListener("click", () => markSkippedWorkout(p.id, d.id));
-    byId("emptyWorkoutBtn")?.addEventListener("click", startEmptyWorkout);
-    byId("viewTodayRecordBtn")?.addEventListener("click", (e) => openHistoryRecord(e.currentTarget.dataset.session));
-    document.querySelectorAll(".resume-session").forEach((b) => b.addEventListener("click", () => resumeSession(b.dataset.session)));
-    document.querySelectorAll(".discard-session").forEach((b) =>
-      b.addEventListener("click", () => {
-        if (!confirm("Discard this unfinished workout? Logged sets in it will be deleted.")) return;
-        state.sessions = state.sessions.filter((x) => x.id !== b.dataset.session);
-        save();
-        renderTrain();
-        showToast("Unfinished workout discarded.");
-      }),
-    );
-    wireTrainWeek(p);
+    const stack = view.querySelector(".train-stack");
+    stack.addEventListener("click", (e) => {
+      const day = e.target.closest(".train-week-day");
+      if (day) return selectTrainDay(p, day.dataset.trainDate);
+      const b = e.target.closest("[data-act]");
+      if (!b || b.disabled) return;
+      const { act, session, day: dayId } = b.dataset;
+      if (act === "record") openHistoryRecord(session);
+      else if (act === "resume") resumeSession(session);
+      else if (act === "discard") discardUnfinished(session);
+      else if (act === "preview" && p) openTrainPreview(p.id, dayId);
+      else if (act === "skip" && p) markSkippedWorkout(p.id, dayId);
+      else if (act === "empty") startEmptyWorkout();
+    });
+    keepRibbonDayVisible();
     wireBackupReminder();
     wireRevisionCard(renderTrain);
-    document
-      .querySelectorAll(".preview-program-day")
-      .forEach((r) => r.addEventListener("click", () => openTrainPreview(p.id, r.dataset.day)));
   }
 
   function resetLiveUi() {
@@ -1431,11 +1547,12 @@
     renderTrain();
     showToast("Workout started · previous values pre-filled.");
   }
-  function markSkippedWorkout(programId, dayId) {
+  async function markSkippedWorkout(programId, dayId) {
     const p = state.programs[programId],
       d = p?.days.find((x) => x.id === dayId);
     if (!d) return;
-    if (!confirm(`Mark ${d.name} as skipped for today?`)) return;
+    if (!(await askConfirm(`Mark ${d.name} as skipped?`, "It's recorded as skipped for today, with no sets. You can still train later if plans change.", { ok: "Mark skipped" })))
+      return;
     state.sessions.push({
       id: uid("sess"),
       date: isoToday(),
@@ -1574,8 +1691,9 @@
         showToast("Workout paused. Resume it from Train.");
       }
     });
-    byId("deleteSessionBtn").addEventListener("click", () => {
-      if (!confirm("Delete this workout permanently?")) return;
+    byId("deleteSessionBtn").addEventListener("click", async () => {
+      if (!(await askConfirm("Delete this workout?", "It's removed for good, with every set logged in it.", { ok: "Delete", danger: true })))
+        return;
       state.sessions = state.sessions.filter((x) => x.id !== s.id);
       if (state.currentWorkoutId === s.id) state.currentWorkoutId = null;
       save();
@@ -1839,13 +1957,18 @@
       if (reps && reps.value.trim() !== "") setAmount(st, reps.value);
       if (rir && !rir.disabled) st.rir = rir.value.trim() === "" ? null : clamp(numIn(rir.value), 0, 5);
     };
-    // Changing a number on a set that's already logged gets the same typo check as ticking it.
+    // Changing a number on a set that's already logged gets the same typo check as ticking it. The new number
+    // is saved straight away; "Put back" restores what was there.
     const keepChange = (st, before) => {
-      if (!st.complete) return true;
+      if (!st.complete) return;
       const odd = unlikelySet(session, item, ex, st);
-      if (!odd || confirm(`${odd.text}\n\nKeep it? Cancel puts back what was there.`)) return true;
-      Object.assign(st, before);
-      return false;
+      if (!odd) return;
+      askConfirm("Check this number", odd.text, { ok: "Keep it", cancel: "Put back" }).then((keep) => {
+        if (keep) return;
+        Object.assign(st, before);
+        save();
+        if (view.querySelector(".workout-head") && byId(`exercise_${item.id}`)) rerender(`[data-set-entry="${st.id}"]`);
+      });
     };
     root.querySelectorAll(".set-load, .set-reps, .set-rir").forEach(selectOnFocus);
     card.querySelector(".unit-toggle")?.addEventListener("click", () => {
@@ -1897,9 +2020,9 @@
         const before = { loadKg: st.loadKg };
         st.loadKg = Math.max(0, exToKg(ex, el.value));
         if (el.value.trim() !== "") typedLoads.add(st.id);
-        if (!keepChange(st, before)) el.value = st.loadKg ? exWeight(ex, st.loadKg) : "";
         touch();
         save();
+        keepChange(st, before);
       }),
     );
     root.querySelectorAll(".set-reps").forEach((el) =>
@@ -1907,10 +2030,9 @@
         const st = item.sets.find((x) => x.id === el.dataset.set);
         const before = { reps: st.reps, durationSec: st.durationSec, distanceKm: st.distanceKm };
         setAmount(st, el.value);
-        if (!keepChange(st, before))
-          el.value = (isDurationBased(ex) ? st.durationSec : ex.trackingType === "distance_duration" ? st.distanceKm : st.reps) || "";
         touch();
         save();
+        keepChange(st, before);
       }),
     );
     root.querySelectorAll(".set-rir").forEach((el) =>
@@ -1922,18 +2044,22 @@
       }),
     );
     root.querySelectorAll(".done-btn").forEach((el) =>
-      el.addEventListener("click", () => {
+      el.addEventListener("click", async () => {
         const st = item.sets.find((x) => x.id === el.dataset.set);
+        if (!st) return;
         syncRow(st);
         // A number far outside what you usually do is almost always a typo: ask before it's logged, because
         // whatever is logged becomes "Previous" and is pre-filled into the next workout.
         if (!st.complete) {
           const odd = unlikelySet(session, item, ex, st);
-          if (odd && !confirm(`${odd.text}\n\nLog it anyway? Cancel lets you fix it first.`)) {
-            save();
-            const field = root.querySelector(`.set-row[data-set="${st.id}"] ${odd.field === "load" ? ".set-load" : ".set-reps"}`);
-            field?.focus();
-            return;
+          if (odd) {
+            save(); // keep what was typed, whichever way you answer
+            const logIt = await askConfirm("Check this number", odd.text, { ok: "Log it anyway", cancel: "Fix it" });
+            if (!logIt) {
+              document.querySelector(`.set-row[data-set="${st.id}"] ${odd.field === "load" ? ".set-load" : ".set-reps"}`)?.focus();
+              return;
+            }
+            if (st.complete || !item.sets.includes(st)) return;
           }
         }
         const wasExerciseComplete = itemComplete(item);
@@ -2130,22 +2256,28 @@
     );
     // Repair: numbers typed as the wrong unit (e.g. a machine's lb typed into kg boxes). The numbers stay; their
     // unit changes, so 100 "kg" becomes 100 lb = 45.4 kg. Only this exercise in this workout.
-    byId("fixUnitBtn")?.addEventListener("click", () => {
+    byId("fixUnitBtn")?.addEventListener("click", async () => {
       const first = item.sets.find((st) => num(st.loadKg) > 0),
         typed = exWeight(ex, first.loadKg),
         asKg = (kg) => (u === "kg" ? num(kg) / LB : num(kg) * LB),
         n = item.sets.filter((st) => num(st.loadKg) > 0).length;
-      if (
-        !confirm(
-          `${ex.name}, ${fmtDate(session.date)}: were these weights ${other}, not ${u}?\n\n${typed} ${u} becomes ${typed} ${other} (${kgIn(u, asKg(first.loadKg))} ${u}). ${n} set${n === 1 ? "" : "s"} in this workout change; nothing else does.`,
-        )
-      )
-        return;
+      const fix = await askConfirm(
+        `Were these weights in ${other}, not ${u}?`,
+        `${ex.name}, ${fmtDate(session.date)}.\n\n${typed} ${u} becomes ${typed} ${other} (${kgIn(u, asKg(first.loadKg))} ${u}). ${n} set${n === 1 ? "" : "s"} in this workout change; nothing else does.`,
+        { ok: `Yes, they were ${other}` },
+      );
+      if (!fix) return;
       item.sets.forEach((st) => {
         if (num(st.loadKg) > 0) st.loadKg = asKg(st.loadKg);
       });
       const exObj = getExercise(item.exerciseId);
-      if (exObj && confirm(`Log ${ex.name} in ${other} from now on?`)) {
+      if (
+        exObj &&
+        (await askConfirm(`Log ${ex.name} in ${other} from now on?`, "Weights are still saved in kg; this only changes how they're shown and typed.", {
+          ok: `Use ${other}`,
+          cancel: "Just this workout",
+        }))
+      ) {
         exObj.unit = other;
         exObj.updatedAt = Date.now();
       }
@@ -2185,25 +2317,33 @@
       closeModal();
       renderLiveSession(session);
     });
-    byId("removeExerciseSessionBtn").addEventListener("click", () => {
-      if (!confirm(`Remove ${ex.name} from this workout?`)) return;
-      session.items.splice(idx, 1);
+    byId("removeExerciseSessionBtn").addEventListener("click", async () => {
+      if (!(await askConfirm(`Remove ${ex.name} from this workout?`, "Its sets in this workout are removed too.", { ok: "Remove", danger: true })))
+        return;
+      const at = session.items.indexOf(item);
+      if (at < 0) return closeModal();
+      session.items.splice(at, 1);
       save();
       closeModal();
       renderLiveSession(session);
     });
   }
-  function finishSession(s, status) {
+  async function finishSession(s, status) {
     const completed = s.items.reduce((n, i) => n + workingSets(i).length, 0),
       total = s.items.reduce((n, i) => n + allWorkingSets(i).length, 0);
     const aIncomplete = s.items.some(
       (i) => i.target?.priority === "A" && workingSets(i).length < Math.max(1, i.target.sets),
     );
     if (status === "complete" && ((total && completed / total < 0.9) || aIncomplete)) {
-      if (!confirm("Less than 90% of prescribed work or a Priority-A exercise is incomplete. Mark complete anyway?"))
-        return;
+      const anyway = await askConfirm(
+        "Mark it complete anyway?",
+        "Less than 90% of the prescribed work is logged, or a Priority-A exercise isn't finished. You can also finish it as shortened.",
+        { ok: "Mark complete", cancel: "Go back" },
+      );
+      if (!anyway || !state.sessions.includes(s)) return;
     }
     const editingHistory = !!s.endTime;
+    const weekBefore = trainWeekStats();
     s.status = status;
     // Only a live workout gets a new end time. Editing a past workout must not change its duration.
     if (!editingHistory) s.endTime = Date.now();
@@ -2212,15 +2352,77 @@
     stopElapsedTimer();
     releaseWakeLock();
     const prs = sessionPRs(s);
-    if (editingHistory) selectedHistorySessionId = s.id;
-    navigate("history");
-    showToast(
-      editingHistory
-        ? "Workout updated."
-        : prs.length
-          ? `${prs.length} PR${prs.length > 1 ? "s" : ""} recorded.`
-          : `Workout ${status}.`,
+    if (editingHistory) {
+      selectedHistorySessionId = s.id;
+      navigate("history");
+      return showToast("Workout updated.");
+    }
+    // A finished live workout: back to Train (the week fills in behind) with a short summary on top.
+    stopRestTimer();
+    trainSelectedDate = s.date;
+    navigate("train");
+    openWorkoutSummary(s, prs, weekBefore, trainWeekStats());
+  }
+  // What the workout added up to, shown once when a live workout is finished (v2.18). Reads only; saves nothing.
+  function openWorkoutSummary(s, prs, before, after) {
+    const sets = s.items.reduce((n, i) => n + workingSets(i).length, 0),
+      planned = s.items.reduce((n, i) => n + allWorkingSets(i).length, 0),
+      vol = s.items.reduce((n, i) => n + workingSets(i).reduce((a, x) => a + setVolume(x), 0), 0),
+      secs = sessionDuration(s);
+    const pct = (w) => (w.scheduled ? Math.min(100, Math.round((w.fulfilled / w.scheduled) * 100)) : 0);
+    const byExercise = new Map();
+    prs.forEach((pr) => {
+      const types = byExercise.get(pr.exerciseId) || new Set();
+      types.add(pr.type);
+      byExercise.set(pr.exerciseId, types);
+    });
+    const prRows = [...byExercise.entries()]
+      .slice(0, 4)
+      .map(([id, types]) => {
+        const name = getExercise(id)?.name || s.items.find((i) => i.exerciseId === id)?.exerciseSnapshot?.name || "Exercise";
+        return `<div class="summary-pr"><strong>${esc(name)}</strong><span class="pill good">★ ${esc([...types].join(" + "))}</span></div>`;
+      })
+      .join("");
+    const counted = after.fulfilled > before.fulfilled;
+    const weekLine = !after.scheduled
+      ? `${after.logged} workout${after.logged === 1 ? "" : "s"} logged this week.`
+      : after.fulfilled >= after.scheduled && counted
+        ? "Every planned session this week is done."
+        : counted
+          ? `${after.fulfilled} of ${after.scheduled} planned sessions done this week.`
+          : `Extra workout · ${after.fulfilled} of ${after.scheduled} planned sessions done this week.`;
+    openModal(
+      s.status === "complete" ? "Workout complete" : "Workout shortened",
+      s.name,
+      `<div class="workout-summary">
+        <div class="summary-week">
+          ${after.scheduled ? `<div class="summary-ring" aria-hidden="true"><svg viewBox="0 0 64 64"><circle class="summary-ring-track" cx="32" cy="32" r="27"/><circle class="summary-ring-fill" cx="32" cy="32" r="27" pathLength="100" stroke-dasharray="${pct(after)} 100" transform="rotate(-90 32 32)"/></svg><span><strong>${after.fulfilled}/${after.scheduled}</strong><small>week</small></span></div>` : `<div class="summary-check" aria-hidden="true">✓</div>`}
+          <p>${esc(weekLine)}</p>
+        </div>
+        <div class="summary-stats">
+          <div><span class="meta">Duration</span><strong>${secs ? durationText(secs) : "—"}</strong></div>
+          <div><span class="meta">Sets</span><strong>${sets}</strong><small class="muted">${planned > sets ? `of ${planned}` : "working"}</small></div>
+          <div><span class="meta">Volume</span><strong>${vol ? Math.round(unitWeight(vol)).toLocaleString() : "—"}</strong><small class="muted">${weightUnit()}-reps</small></div>
+          <div><span class="meta">PRs</span><strong>${distinctPRCount(prs)}</strong><small class="muted">${byExercise.size ? `${byExercise.size} exercise${byExercise.size === 1 ? "" : "s"}` : "this time"}</small></div>
+        </div>
+        ${prRows ? `<div class="summary-prs">${prRows}${byExercise.size > 4 ? `<p class="meta">+ ${byExercise.size - 4} more in the record</p>` : ""}</div>` : ""}
+      </div>`,
+      `<button class="btn ghost" id="summaryDetailsBtn" type="button">See record</button><button class="btn primary" id="summaryDoneBtn" type="button">Done</button>`,
     );
+    byId("summaryDoneBtn").addEventListener("click", closeModal);
+    byId("summaryDetailsBtn").addEventListener("click", () => {
+      closeModal();
+      openHistoryRecord(s.id);
+    });
+    // The week ring fills from where it was to where it is now.
+    const fill = modalBody.querySelector(".summary-ring-fill");
+    if (fill?.animate && counted && !window.matchMedia?.("(prefers-reduced-motion: reduce)").matches)
+      fill.animate([{ strokeDasharray: `${pct(before)} 100` }, { strokeDasharray: `${pct(after)} 100` }], {
+        duration: 750,
+        delay: 220,
+        easing: "cubic-bezier(.2,.8,.2,1)",
+        fill: "backwards",
+      });
   }
   // Which PR types make sense for each tracking type.
   function prRules(ex) {
@@ -2557,8 +2759,9 @@
       renderPrograms();
       showToast("Program duplicated.");
     });
-    byId("deleteProgramBtn")?.addEventListener("click", () => {
-      if (!confirm(`Delete ${p.name}? Historical workouts remain.`)) return;
+    byId("deleteProgramBtn")?.addEventListener("click", async () => {
+      if (!(await askConfirm(`Delete ${p.name}?`, "Workouts you've already logged stay in History.", { ok: "Delete program", danger: true }))) return;
+      if (!state.programs[p.id]) return;
       delete state.programs[p.id];
       if (state.settings.activeProgramId === p.id) state.settings.activeProgramId = Object.keys(state.programs)[0];
       selectedProgramId = state.settings.activeProgramId;
@@ -2755,8 +2958,8 @@
       closeModal();
       renderPrograms();
     });
-    byId("deleteDayBtn")?.addEventListener("click", () => {
-      if (!confirm("Delete this program day? Historical workouts remain.")) return;
+    byId("deleteDayBtn")?.addEventListener("click", async () => {
+      if (!(await askConfirm(`Delete ${d.name || "this program day"}?`, "Workouts you've already logged stay in History.", { ok: "Delete day", danger: true }))) return;
       p.days = p.days.filter((x) => x.id !== d.id);
       save();
       closeModal();
@@ -2933,13 +3136,13 @@
       wireLibraryModal();
       showToast(ex.archived ? "Exercise archived." : "Exercise restored.");
     });
-    byId("detailDeleteEx")?.addEventListener("click", () => {
+    byId("detailDeleteEx")?.addEventListener("click", async () => {
       const currentUsage = exerciseProgramUsage(ex.id),
         historyUsage = exerciseHistoryUsage(ex.id);
       if (currentUsage.length || historyUsage) {
         return showToast("Archive this exercise instead; it is referenced by programs or history.");
       }
-      if (!confirm(`Delete ${ex.name} permanently?`)) return;
+      if (!(await askConfirm(`Delete ${ex.name}?`, "This custom exercise is removed from your library for good.", { ok: "Delete", danger: true }))) return;
       delete state.exercises[ex.id];
       save();
       modalBody.innerHTML = libraryHTML();
@@ -3257,8 +3460,9 @@
       selectedHistorySessionId = null;
       navigate("train");
     });
-    byId("deleteHistoryBtn").addEventListener("click", () => {
-      if (!confirm("Delete this historical workout?")) return;
+    byId("deleteHistoryBtn").addEventListener("click", async () => {
+      if (!(await askConfirm("Delete this workout?", `${s.name}, ${fmtDate(s.date)}. It's removed from History, stats and PRs for good.`, { ok: "Delete", danger: true })))
+        return;
       state.sessions = state.sessions.filter((x) => x.id !== s.id);
       save();
       selectedHistorySessionId = null;
@@ -3389,30 +3593,6 @@
     const recent = recentlyWorkedMuscles();
     const hit = [...new Set(day.items.map((i) => getExercise(i.exerciseId)?.primaryMuscle).filter((m) => m && recent.has(m)))];
     return hit.length ? `Worked in the last 2 days: ${hit.map(muscleName).join(", ")}` : "";
-  }
-  // Scheduled days earlier this week that have no workout yet (done, shortened or skipped all count).
-  function missedThisWeek(p) {
-    if (!p) return [];
-    const today = isoToday(),
-      start = startOfWeek(today),
-      startDow = dateObj(start).getDay(),
-      todayPos = (dateObj(today).getDay() - startDow + 7) % 7;
-    return p.days
-      .filter((d) => Number(d.weekday) >= 0)
-      .map((d) => ({ day: d, pos: (Number(d.weekday) - startDow + 7) % 7 }))
-      .filter(({ day, pos }) => pos < todayPos && !state.sessions.some((x) => x.programDayId === day.id && x.date >= start && x.date <= today && ["complete", "shortened", "skipped", "in_progress"].includes(x.status)))
-      .sort((a, b) => a.pos - b.pos)
-      .map(({ day, pos }) => ({ day, date: addDays(start, pos) }));
-  }
-  function catchUpHTML(p) {
-    const missed = missedThisWeek(p);
-    if (!missed.length) return "";
-    return `<section class="card catch-up-card"><div class="section-title"><h2>Still to do this week</h2><span class="meta">${missed.length} session${missed.length > 1 ? "s" : ""}</span></div><div class="list" style="margin-top:6px">${missed
-      .map(({ day, date }) => {
-        const note = restNote(day);
-        return `<div class="list-row click-row preview-program-day" data-day="${day.id}"><div><strong>${esc(day.name)}</strong><div class="meta">Planned ${weekdayName(dateObj(date).getDay())} · ${day.items.length} exercises</div>${note ? `<div class="meta rest-warn">${esc(note)}</div>` : `<div class="meta rest-ok">Muscles rested</div>`}</div><span class="row-chevron">›</span></div>`;
-      })
-      .join("")}</div></section>`;
   }
 
   // ---------- program updates (offered once, applied only on request) ----------
@@ -4267,12 +4447,12 @@
       `<button class="btn primary" id="saveBodyEntry" type="button">Save</button>`,
     );
     setTimeout(() => focus && byId(`body_${focus}`)?.focus(), 0);
-    byId("saveBodyEntry").addEventListener("click", () => {
+    byId("saveBodyEntry").addEventListener("click", async () => {
       const newDate = byId("bodyDate").value || e.date || date;
       // Moving an entry onto a date that already has one merges them instead of creating a duplicate.
       const clash = state.bodyEntries.find((x) => x.date === newDate && x.id !== e.id);
       const target = clash || e;
-      if (clash && !confirm(`There is already an entry on ${fmtDate(newDate)}. Update that entry with these values?`))
+      if (clash && !(await askConfirm(`${fmtDate(newDate)} already has an entry`, "Update that entry with these values?", { ok: "Update entry" })))
         return;
       target.date = newDate;
       bodyFields.forEach(([k]) => {
@@ -4292,8 +4472,8 @@
       else render();
       showToast("Measurement saved.");
     });
-    byId("deleteBodyEntry")?.addEventListener("click", () => {
-      if (!confirm(`Delete the body entry for ${fmtDate(e.date)}?`)) return;
+    byId("deleteBodyEntry")?.addEventListener("click", async () => {
+      if (!(await askConfirm(`Delete the entry for ${fmtDate(e.date)}?`, "Its body weight and measurements are removed.", { ok: "Delete", danger: true }))) return;
       state.bodyEntries = state.bodyEntries.filter((x) => x.id !== e.id);
       save();
       closeModal();
@@ -4516,8 +4696,8 @@
       renderProgress();
       showToast(g ? "Goal updated." : "Goal created.");
     });
-    byId("deleteGoalBtn")?.addEventListener("click", () => {
-      if (!confirm("Delete this goal?")) return;
+    byId("deleteGoalBtn")?.addEventListener("click", async () => {
+      if (!(await askConfirm("Delete this goal?", "", { ok: "Delete", danger: true }))) return;
       state.goals = state.goals.filter((x) => x.id !== g.id);
       save();
       closeModal();
@@ -4749,9 +4929,10 @@
     byId("exportBtn").addEventListener("click", exportBackup);
     byId("importInput").addEventListener("change", importBackup);
     byId("undoImportBtn")?.addEventListener("click", undoImport);
-    byId("discardUndoBtn")?.addEventListener("click", () => {
+    byId("discardUndoBtn")?.addEventListener("click", async () => {
       if (dataLocked()) return;
-      if (!confirm("Delete the undo copy? This frees storage but you won't be able to restore it.")) return;
+      if (!(await askConfirm("Delete the undo copy?", "This frees storage, but you won't be able to restore it.", { ok: "Delete", danger: true }))) return;
+      if (dataLocked()) return;
       try {
         store.remove(PRE_IMPORT_KEY);
       } catch {}
@@ -4767,13 +4948,15 @@
         "application/json",
       ),
     );
-    byId("resetBtn").addEventListener("click", () => {
+    byId("resetBtn").addEventListener("click", async () => {
       if (dataLocked()) return;
-      if (!confirm("Reset all Strength OS data on this device? Export a backup first.")) return;
+      if (!(await askConfirm("Reset all Strength OS data on this device?", "Export a backup first.", { ok: "Reset", danger: true }))) return;
+      if (dataLocked()) return;
       try {
         store.set(PRE_IMPORT_KEY, JSON.stringify(state));
       } catch {
-        if (!confirm("There isn't room to keep an undo copy. Reset anyway?")) return;
+        if (!(await askConfirm("No room for an undo copy", "There isn't room to keep an undo copy. Reset anyway?", { ok: "Reset anyway", danger: true }))) return;
+        if (dataLocked()) return;
       }
       stopRestTimer();
       state = newState();
@@ -5172,7 +5355,7 @@
     if (!file) return;
     if (dataLocked()) return void (e.target.value = "");
     const r = new FileReader();
-    r.onload = () => {
+    r.onload = async () => {
       let parsed;
       try {
         parsed = JSON.parse(r.result);
@@ -5184,11 +5367,14 @@
       const curSessions = state.sessions.filter((x) => ["complete", "shortened"].includes(x.status)).length;
       const when = check.savedAt ? ` (saved ${new Date(check.savedAt).toLocaleDateString()})` : "";
       if (
-        !confirm(
-          `Replace all Strength OS data on this device with this backup?\n\nNow: ${curSessions} workouts, ${state.bodyEntries.length} body entries.\nBackup${when}: ${check.sessions} workouts, ${check.body} body entries.\n\nA copy of your current data is kept so you can undo from More → Data health.`,
-        )
+        !(await askConfirm(
+          "Replace all data with this backup?",
+          `Now: ${curSessions} workouts, ${state.bodyEntries.length} body entries.\nBackup${when}: ${check.sessions} workouts, ${check.body} body entries.\n\nA copy of your current data is kept so you can undo from More → Data health.`,
+          { ok: "Replace my data", danger: true },
+        ))
       )
         return;
+      if (dataLocked()) return;
       let next;
       try {
         next = check.legacy ? migrateLegacy(parsed) : normalizeState(migrateStateSchema(parsed));
@@ -5200,7 +5386,12 @@
       try {
         store.set(PRE_IMPORT_KEY, JSON.stringify(state));
       } catch {
-        if (!confirm("There isn't room to keep an undo copy of your current data. Import anyway? (Export a backup first if unsure.)"))
+        if (
+          !(await askConfirm("No room for an undo copy", "There isn't room to keep an undo copy of your current data. Import anyway? Export a backup first if unsure.", {
+            ok: "Import anyway",
+            danger: true,
+          }))
+        )
           return;
       }
       stopRestTimer();
@@ -5215,14 +5406,15 @@
     r.readAsText(file);
     e.target.value = "";
   }
-  function undoImport() {
+  async function undoImport() {
     if (dataLocked()) return;
     let prev;
     try {
       prev = JSON.parse(store.get(PRE_IMPORT_KEY) || "null");
     } catch {}
     if (!prev) return showToast("No undo copy found.");
-    if (!confirm("Restore the data you had before the last import? The imported data will be replaced.")) return;
+    if (!(await askConfirm("Restore your previous data?", "The data you had before the last import comes back, and the imported data is replaced.", { ok: "Restore" }))) return;
+    if (dataLocked()) return;
     state = normalizeState(migrateStateSchema(prev));
     if (!save()) return;
     try {
@@ -5259,6 +5451,69 @@
         actions[Number(b.dataset.actionI)][1]();
       }),
     );
+  }
+  // In-app yes/no question (v2.18), used everywhere instead of the browser's confirm(). Resolves true/false.
+  // A question asked while another is showing waits its turn, so two never overlap (e.g. a number checked on
+  // "change" and again by the ✓ tap that caused that change).
+  let confirmQueue = Promise.resolve();
+  function askConfirm(title, message = "", { ok = "OK", cancel = "Cancel", danger = false } = {}) {
+    const ask = () =>
+      new Promise((resolve) => {
+        const dlg = byId("confirmSheet");
+        if (!dlg?.showModal) return resolve(window.confirm([title, message].filter(Boolean).join("\n\n")));
+        // Put the keyboard away first: the sheet is the only thing to answer, and closing it must not refocus a field.
+        const focused = document.activeElement;
+        if (focused?.matches?.("input, textarea, select")) focused.blur();
+        byId("confirmTitle").textContent = title;
+        byId("confirmMessage").innerHTML = String(message || "")
+          .split(/\n{2,}/)
+          .filter((p) => p.trim())
+          .map((p) => `<p>${esc(p).replace(/\n/g, "<br>")}</p>`)
+          .join("");
+        const okBtn = byId("confirmOkBtn"),
+          cancelBtn = byId("confirmCancelBtn");
+        okBtn.textContent = ok;
+        cancelBtn.textContent = cancel;
+        okBtn.className = `btn ${danger ? "danger" : "primary"}`;
+        const openedAt = Date.now();
+        let settled = false;
+        const finish = (answer) => {
+          if (settled) return;
+          settled = true;
+          okBtn.onclick = cancelBtn.onclick = dlg.onclick = dlg.oncancel = null;
+          if (dlg.open) dlg.close();
+          resolve(answer);
+        };
+        okBtn.onclick = () => finish(true);
+        cancelBtn.onclick = () => finish(false);
+        dlg.oncancel = (e) => {
+          e.preventDefault();
+          finish(false);
+        };
+        // Tapping the dimmed page means "no" — but not the end of the very tap that opened the sheet.
+        dlg.onclick = (e) => {
+          if (e.target === dlg && Date.now() - openedAt > 450) finish(false);
+        };
+        dlg.showModal();
+        cancelBtn.focus({ preventScroll: true });
+      });
+    const answer = confirmQueue.then(ask, ask);
+    confirmQueue = answer.catch(() => {});
+    return answer;
+  }
+  // On phones, keep a pop-up's bottom edge above the on-screen keyboard while you type in it.
+  function watchKeyboardForSheets() {
+    const vv = window.visualViewport;
+    if (!vv) return;
+    const update = () => {
+      const typing = document.activeElement?.closest?.("dialog[open]") && document.activeElement.matches("input, textarea, select");
+      const gap = Math.round(window.innerHeight - vv.height - vv.offsetTop);
+      document.documentElement.style.setProperty("--kb", typing && gap > 120 ? `${gap}px` : "0px");
+    };
+    vv.addEventListener("resize", update);
+    vv.addEventListener("scroll", update);
+    document.addEventListener("focusin", update);
+    document.addEventListener("focusout", () => setTimeout(update, 60));
   }
   function openTextModal(title, value, onSave) {
     openModal(
