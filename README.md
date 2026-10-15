@@ -1,5 +1,13 @@
 # Strength OS — PWA
 
+## v2.17.0 — live workout feedback (review candidate)
+
+Live workout logging now gives a brief visual acknowledgment when a set is checked or reopened, and shows **All sets logged** when an exercise's working sets are complete. A completed exercise gets subtle contextual styling and a short completion toast (unless a personal-record notification takes priority). The live workout progress bar smoothly advances from its previous percentage, with animation disabled when iOS Reduced Motion is enabled. These effects are restricted to active sessions; historical workout editing does not trigger celebratory feedback.
+
+The existing set-logging mechanism is unchanged: values are synchronized from iPhone inputs before the set is recorded, the typo confirmation remains, records still save through IndexedDB, progress math and auto-rest conditions are unchanged, and the existing targeted re-render preserves scroll position and next-set focus. **No new audio, settings, data schema, migrations, or backup-format changes**. All PWA files use app/cache version v2.17.0.
+
+**iPhone acceptance (SF301–SF308):** new visual check/reopen acknowledgment; all-sets-complete label and one-time toast; dynamic progress from both logging and reopening; no duplicated PR message; next-set focus, live typing and scroll position; rest timer and supersets; history editing with no celebratory effects; light/dark/compact and Reduced Motion, offline reopen, history/data retention.
+
 ## v2.16.0 — interactive training week
 
 Train now includes a seven-day ribbon for the **current week**, respecting the selected Monday/Sunday week start. Tapping a date updates a contextual detail card and shows actual logged sessions (complete, shortened, skipped or paused) alongside the *current* program's weekday pattern. A completion ring shows scheduled sessions fulfilled by a matching completed or shortened workout; extra/unscheduled sessions do not inflate that percentage. Tapping View record, Resume or Preview uses the existing screens. Previewing a different weekday never backdates a new workout: starting a workout still records it on today's date.
