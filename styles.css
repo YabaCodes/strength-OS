@@ -3562,7 +3562,7 @@ html[data-theme="dark"] .summary-ring-track { stroke: rgba(94, 234, 212, 0.18); 
 .summary-prs { display: grid; }
 .summary-pr { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 6px 10px; padding: 9px 0; border-top: 1px solid var(--line); }
 .summary-pr:first-child { border-top: 0; padding-top: 0; }
-.summary-pr strong { flex: 1 1 130px; min-width: 0; font-size: 14px; overflow-wrap: anywhere; }
+.summary-pr strong { flex: 1 1 170px; min-width: 0; font-size: 14px; overflow-wrap: anywhere; }
 .summary-pr .pill { flex-shrink: 0; }
 .summary-prs > .meta { margin: 6px 0 0; }
 @media (max-width: 440px) {
